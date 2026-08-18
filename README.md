@@ -1,15 +1,16 @@
 # smm-agent
 
 `smm-agent` is an automated social media marketing agent for real estate. It
-runs on Cloudflare Workers and publishes a fresh, on-brand post to every
+runs on Cloudflare Workers and publishes three fresh, on-brand posts to every
 connected social channel every week — no manual writing, image sourcing, or
 scheduling required.
 
-Each week the agent picks a topic, writes the post copy, generates a
-custom graphic, and schedules the post as a draft in Buffer. A human reviews
-the draft and clicks Schedule Post to publish it. Over time, a built-in
-performance analyst reads engagement metrics and feeds writing recommendations
-back into future posts so the content improves automatically.
+Each week the agent picks three topics, writes the post copy, generates a
+custom graphic for each, and schedules the posts as drafts in Buffer (one for
+Monday, Wednesday, and Friday). A human reviews each draft and clicks Schedule
+Post to publish it. Over time, a built-in performance analyst reads engagement
+metrics and feeds writing recommendations back into future posts so the content
+improves automatically.
 
 ## Architecture
 
