@@ -122,6 +122,7 @@ Install the following before you begin:
    OPENAI_API_KEY=
    BUFFER_API_KEY=
    BUFFER_ORGANIZATION_ID=
+   ASSET_PUBLIC_BASE_URL=
    ```
 
 3. Install the Python dependencies:
@@ -147,7 +148,7 @@ are set with `wrangler secret put` and never appear in the repository.
 | `OPENAI_API_KEY` | secret | Authenticates OpenAI Agents and GPT Image 2 calls |
 | `BUFFER_API_KEY` | secret | Authenticates the Buffer GraphQL API |
 | `BUFFER_ORGANIZATION_ID` | secret | Targets the Buffer organization |
-| `ASSET_PUBLIC_BASE_URL` | `wrangler.jsonc` | Public origin of the Worker, used to build image URLs for Buffer |
+| `ASSET_PUBLIC_BASE_URL` | secret | Public origin of the Worker, used to build image URLs for Buffer |
 | `OPENAI_IMAGE_MODEL` | `wrangler.jsonc` | GPT Image 2 model name |
 | `OPENAI_IMAGE_WIDTH` | `wrangler.jsonc` | Image width in pixels (multiple of 16) |
 | `OPENAI_IMAGE_HEIGHT` | `wrangler.jsonc` | Image height in pixels (multiple of 16) |
@@ -257,8 +258,8 @@ uv run python src/cli.py buffer_state
 The Worker deploys with `pywrangler`, the CLI for Cloudflare Python Workers.
 `pywrangler` bundles the Python dependencies into the Worker upload.
 
-1. Set `ASSET_PUBLIC_BASE_URL` in `wrangler.jsonc` to the deployed Worker
-   origin (for example, `https://smm-agent.<subdomain>.workers.dev`).
+1. Fill in the `database_id` in `wrangler.jsonc` with your D1 database ID
+   (find it with `npx wrangler d1 list`).
 2. Apply the D1 migrations to the remote database:
 
    ```bash
@@ -271,7 +272,11 @@ The Worker deploys with `pywrangler`, the CLI for Cloudflare Python Workers.
    npx wrangler secret put OPENAI_API_KEY
    npx wrangler secret put BUFFER_API_KEY
    npx wrangler secret put BUFFER_ORGANIZATION_ID
+   npx wrangler secret put ASSET_PUBLIC_BASE_URL
    ```
+
+   For `ASSET_PUBLIC_BASE_URL`, use the deployed Worker origin (for example,
+   `https://smm-agent.<subdomain>.workers.dev`) without a trailing path.
 
 4. Deploy the Worker:
 

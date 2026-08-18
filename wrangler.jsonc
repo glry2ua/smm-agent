@@ -11,10 +11,9 @@
   "triggers": {
     "crons": ["0 14 * * MON"]
   },
-  // Set this to the deployed Worker origin, without a path. The application
-  // rejects an empty or non-HTTPS value before it creates image assets.
+  // Non-secret configuration. Set ASSET_PUBLIC_BASE_URL and database_id
+  // before deploying; see the README deployment section.
   "vars": {
-    "ASSET_PUBLIC_BASE_URL": "",
     "OPENAI_IMAGE_MODEL": "gpt-image-2",
     "OPENAI_IMAGE_WIDTH": "1088",
     "OPENAI_IMAGE_HEIGHT": "1360",
@@ -42,5 +41,5 @@
     }
   ],
   // Set these values with `wrangler secret put`; do not add secret values here:
-  // OPENAI_API_KEY, BUFFER_API_KEY, BUFFER_ORGANIZATION_ID
+  // OPENAI_API_KEY, BUFFER_API_KEY, BUFFER_ORGANIZATION_ID, ASSET_PUBLIC_BASE_URL
 }
