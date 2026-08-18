@@ -1,18 +1,34 @@
 # smm-agent
 
-`smm-agent` is a weekly Cloudflare Python Worker that generates and schedules
-social media posts for a San Jose real-estate brand. Each Monday it selects an
-unused topic from a D1 database, drafts a post and an image prompt with an
-OpenAI agent, generates a graphic with GPT Image 2, uploads it to an R2 bucket,
-and schedules the post as a Buffer draft on every connected channel.
+`smm-agent` is an automated social media marketing agent for real estate. It
+runs on Cloudflare Workers and publishes a fresh, on-brand post to every
+connected social channel every week — no manual writing, image sourcing, or
+scheduling required.
 
-This repository contains the Worker, the local CLI for dry-run and end-to-end
-testing, the agent definitions, and the test suite.
+Each week the agent picks a topic, writes the post copy, generates a
+custom graphic, and schedules the post as a draft in Buffer. A human reviews
+the draft and clicks Schedule Post to publish it. Over time, a built-in
+performance analyst reads engagement metrics and feeds writing recommendations
+back into future posts so the content improves automatically.
 
 ## Architecture
 
-The following diagram shows how the weekly job moves data between Cloudflare
-bindings, OpenAI, and Buffer.
+`smm-agent` is a Python Worker deployed on Cloudflare Workers. The stack:
+
+- **Cloudflare Workers** hosts the agent and fires a weekly cron trigger.
+- **D1** stores the topic inventory and tracks which topics have been used.
+- **R2** stores brand assets (headshots, property photos, logo) and the
+  generated graphics.
+- **OpenAI Agents SDK** powers two agents: `social-post-editor` drafts the post
+  and image prompt, and `performance-analyst` reads Buffer metrics and returns
+  writing recommendations.
+- **GPT Image 2** generates a custom graphic for each post from a structured
+  image prompt and selected reference images.
+- **Buffer** receives scheduled drafts on every connected channel (LinkedIn,
+  Instagram, Facebook).
+
+The following diagram shows how the weekly job moves data between these
+services:
 
 ```mermaid
 flowchart TD
