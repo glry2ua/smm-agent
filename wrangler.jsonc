@@ -23,8 +23,7 @@
     "MAX_POST_CHARS": "5000",
     "BUFFER_API_URL": "https://api.buffer.com",
     "RETRY_MAX_ATTEMPTS": "3",
-    "RETRY_BACKOFF_SECONDS": "1",
-    "CONTENT_BRIEF": "Create useful, concise social content with a clear point of view. Avoid unsupported claims, engagement bait, and generic filler."
+    "RETRY_BACKOFF_SECONDS": "1"
   },
   "d1_databases": [
     {

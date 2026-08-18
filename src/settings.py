@@ -60,7 +60,6 @@ class Settings:
     buffer_api_key: str
     buffer_organization_id: str
     buffer_api_url: str
-    content_brief: str
     asset_public_base_url: str
     min_schedule_lead_minutes: int | None
     schedule_horizon_days: int | None
@@ -87,7 +86,6 @@ class Settings:
             buffer_api_key=env_value(env, "BUFFER_API_KEY"),
             buffer_organization_id=env_value(env, "BUFFER_ORGANIZATION_ID"),
             buffer_api_url=env_value(env, "BUFFER_API_URL").rstrip("/"),
-            content_brief=env_value(env, "CONTENT_BRIEF"),
             asset_public_base_url=env_value(env, "ASSET_PUBLIC_BASE_URL").rstrip("/"),
             min_schedule_lead_minutes=_int(
                 env_value(env, "MIN_SCHEDULE_LEAD_MINUTES"),
@@ -159,7 +157,6 @@ class Settings:
             "BUFFER_API_KEY": self.buffer_api_key,
             "BUFFER_ORGANIZATION_ID": self.buffer_organization_id,
             "BUFFER_API_URL": self.buffer_api_url,
-            "CONTENT_BRIEF": self.content_brief,
             "MIN_SCHEDULE_LEAD_MINUTES": self.min_schedule_lead_minutes,
             "SCHEDULE_HORIZON_DAYS": self.schedule_horizon_days,
             "MAX_POST_CHARS": self.max_post_chars,

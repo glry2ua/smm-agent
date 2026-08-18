@@ -17,17 +17,23 @@ class AgentConfigTest(TestCase):
 
     def test_renders_dynamic_values_without_leaving_placeholders(self) -> None:
         rendered = render_agent(
-            "performance-analyst",
-            {"content_brief": "Be useful and specific."},
+            "social-post-editor",
+            {
+                "topic": "Test topic",
+                "performance_guidance": "No data yet.",
+                "available_images": "- No reference images available.",
+                "contact_facts": "- No contact info.",
+            },
             directory=AGENTS,
         )
 
-        self.assertIn("Editorial brief:\nBe useful and specific.", rendered)
-        self.assertNotIn("{{content_brief}}", rendered)
+        self.assertIn("Test topic", rendered)
+        self.assertNotIn("{{", rendered)
+        self.assertIn("Editorial brief:", rendered)
 
     def test_rejects_missing_template_values(self) -> None:
-        with self.assertRaisesRegex(AgentConfigError, "content_brief"):
-            render_agent("performance-analyst", {}, directory=AGENTS)
+        with self.assertRaisesRegex(AgentConfigError, "topic"):
+            render_agent("social-post-editor", {}, directory=AGENTS)
 
     def test_rejects_unknown_frontmatter_keys(self) -> None:
         path = AGENTS / "invalid.md"

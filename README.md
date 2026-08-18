@@ -171,7 +171,6 @@ are set with `wrangler secret put` and never appear in the repository.
 | `OPENAI_IMAGE_HEIGHT` | `wrangler.jsonc` | Image height in pixels (multiple of 16) |
 | `OPENAI_IMAGE_QUALITY` | `wrangler.jsonc` | One of `low`, `medium`, `high`, `auto` |
 | `BUFFER_API_URL` | `wrangler.jsonc` | Buffer GraphQL endpoint |
-| `CONTENT_BRIEF` | `wrangler.jsonc` | Editorial brief the agent follows |
 | `MIN_SCHEDULE_LEAD_MINUTES` | `wrangler.jsonc` | Minimum minutes between now and a post's due time |
 | `SCHEDULE_HORIZON_DAYS` | `wrangler.jsonc` | Maximum days between now and a post's due time |
 | `MAX_POST_CHARS` | `wrangler.jsonc` | Maximum characters in the Buffer post text |

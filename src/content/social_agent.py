@@ -14,7 +14,6 @@ from settings import Settings
 
 
 def build_system_prompt(
-    settings: Settings,
     topic: str,
     reference_image_keys: list[str] | None = None,
     performance_analysis: PerformanceAnalysis | None = None,
@@ -43,7 +42,6 @@ def build_system_prompt(
     return render_agent(
         "social-post-editor",
         {
-            "content_brief": settings.content_brief,
             "topic": topic,
             "performance_guidance": performance_guidance,
             "available_images": available_images,
@@ -52,10 +50,10 @@ def build_system_prompt(
     )
 
 
-def build_performance_analyst_prompt(settings: Settings) -> str:
-    """Render the performance analyst instructions with the editorial brief."""
+def build_performance_analyst_prompt() -> str:
+    """Render the performance analyst instructions."""
 
-    return render_agent("performance-analyst", {"content_brief": settings.content_brief})
+    return render_agent("performance-analyst", {})
 
 
 async def analyze_buffer_performance(
@@ -70,7 +68,7 @@ async def analyze_buffer_performance(
     config = load_agent("performance-analyst")
     agent = Agent(
         name="Social performance analyst",
-        instructions=build_performance_analyst_prompt(settings),
+        instructions=build_performance_analyst_prompt(),
         model=config.model,
         model_settings=config.model_settings(),
         output_type=PerformanceAnalysis,
@@ -109,7 +107,6 @@ async def generate_social_post(
     agent = Agent(
         name="Weekly social post editor",
         instructions=build_system_prompt(
-            settings,
             topic,
             reference_image_keys,
             performance_analysis,
