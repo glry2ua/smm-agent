@@ -1,0 +1,16 @@
+.env*
+!.env.example
+.venv/
+.venv-workers/
+.python-version
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.wrangler/
+python_modules/
+node_modules/
+dist/
+dry_run_outputs/
+pylock.toml

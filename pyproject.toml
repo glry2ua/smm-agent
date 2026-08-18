@@ -1,0 +1,33 @@
+[project]
+name = "smm-agent"
+version = "0.1.0"
+description = "A weekly Cloudflare Python Worker for generating and scheduling social posts through Buffer."
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28,<1",
+    "openai-agents>=0.3,<1",
+    "pydantic==2.10.6",
+    "tzdata>=2025.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.9,<1",
+    "workers-py>=1.7",
+    "workers-runtime-sdk",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

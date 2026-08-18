@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "smm-agent",
+  "main": "src/worker.py",
+  "compatibility_date": "2026-08-17",
+  "compatibility_flags": ["python_workers"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": ["0 14 * * MON"]
+  },
+  // Set this to the deployed Worker origin, without a path. The application
+  // rejects an empty or non-HTTPS value before it creates image assets.
+  "vars": {
+    "ASSET_PUBLIC_BASE_URL": "",
+    "OPENAI_IMAGE_MODEL": "gpt-image-2",
+    "OPENAI_IMAGE_WIDTH": "1088",
+    "OPENAI_IMAGE_HEIGHT": "1360",
+    "OPENAI_IMAGE_QUALITY": "medium",
+    "MIN_SCHEDULE_LEAD_MINUTES": "30",
+    "SCHEDULE_HORIZON_DAYS": "8",
+    "MAX_POST_CHARS": "5000",
+    "BUFFER_API_URL": "https://api.buffer.com",
+    "RETRY_MAX_ATTEMPTS": "3",
+    "RETRY_BACKOFF_SECONDS": "1",
+    "CONTENT_BRIEF": "Create useful, concise social content with a clear point of view. Avoid unsupported claims, engagement bait, and generic filler."
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "smm-agent-db",
+      "database_id": "",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "smm-agent-assets"
+    }
+  ],
+  // Set these values with `wrangler secret put`; do not add secret values here:
+  // OPENAI_API_KEY, BUFFER_API_KEY, BUFFER_ORGANIZATION_ID
+}
