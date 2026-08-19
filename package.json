@@ -1,0 +1,9 @@
+{
+  "name": "smm-agent",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "bash dev.sh",
+    "build:webui": "cd webui && npm run build"
+  }
+}

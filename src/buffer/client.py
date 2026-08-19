@@ -58,8 +58,8 @@ query GetAggregatedPostMetrics($input: AggregatedPostMetricsInput!) {
 }
 """
 
-GET_SENT_POSTS_QUERY = """
-query GetSentPosts($input: PostsInput!, $first: Int!, $after: String) {
+GET_POSTS_QUERY = """
+query GetPosts($input: PostsInput!, $first: Int!, $after: String) {
   posts(input: $input, first: $first, after: $after) {
     edges {
       node {
@@ -329,31 +329,39 @@ class BufferClient:
             metrics_updated_at=str(updated_at) if updated_at else None,
         )
 
-    async def list_sent_posts(
+    async def list_posts(
         self,
         organization_id: str,
         *,
         start: datetime,
         end: datetime,
         channel_ids: list[str],
+        statuses: list[str] | None = None,
         page_size: int = 50,
     ) -> list[BufferPost]:
-        """Return all sent posts in a date window, following Buffer cursors."""
+        """Return all posts in a date window, following Buffer cursors.
+
+        ``statuses`` restricts the query to a set of Buffer post statuses such
+        as ``sent``, ``scheduled``, or ``draft``. When ``None``, posts of every
+        status are returned.
+        """
 
         posts: list[BufferPost] = []
         after: str | None = None
         while True:
+            post_filter: dict[str, Any] = {
+                "channelIds": channel_ids,
+                "startDate": _utc_iso(start),
+                "endDate": _utc_iso(end),
+            }
+            if statuses is not None:
+                post_filter["status"] = statuses
             data = await self._graphql(
-                GET_SENT_POSTS_QUERY,
+                GET_POSTS_QUERY,
                 {
                     "input": {
                         "organizationId": organization_id,
-                        "filter": {
-                            "status": ["sent"],
-                            "channelIds": channel_ids,
-                            "startDate": _utc_iso(start),
-                            "endDate": _utc_iso(end),
-                        },
+                        "filter": post_filter,
                         "sort": [
                             {"field": "dueAt", "direction": "desc"},
                             {"field": "createdAt", "direction": "desc"},
@@ -405,6 +413,26 @@ class BufferClient:
                 raise BufferAPIError("Buffer returned an invalid posts pagination cursor")
             after = str(end_cursor)
         return posts
+
+    async def list_sent_posts(
+        self,
+        organization_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        channel_ids: list[str],
+        page_size: int = 50,
+    ) -> list[BufferPost]:
+        """Return all sent posts in a date window (see :meth:`list_posts`)."""
+
+        return await self.list_posts(
+            organization_id,
+            start=start,
+            end=end,
+            channel_ids=channel_ids,
+            statuses=["sent"],
+            page_size=page_size,
+        )
 
     async def create_scheduled_post(
         self,

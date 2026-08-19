@@ -5,6 +5,12 @@
   "compatibility_date": "2026-08-17",
   "compatibility_flags": ["python_workers"],
   "workers_dev": true,
+  "assets": {
+    "directory": "./webui/dist",
+    "binding": "WEBUI",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health", "/assets/*"]
+  },
   "observability": {
     "enabled": true
   },

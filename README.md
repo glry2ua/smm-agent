@@ -99,6 +99,7 @@ agents/                 Agent prompt definitions (frontmatter + instructions)
 migrations/             D1 schema migrations
 src/                    Worker entrypoint, job orchestration, CLI, and modules
 tests/                  Pytest suite
+webui/                  React + shadcn/ui frontend for the content board
 wrangler.jsonc          Cloudflare Worker configuration
 pyproject.toml          Python dependencies and tooling
 ```
@@ -114,8 +115,11 @@ Key modules in `src/`:
 - `image_pipeline.py` — GPT Image 2 generation and R2 upload.
 - `buffer_client.py` — async GraphQL client for Buffer channel listing, post
   creation, and metrics.
+- `webui_api.py` — board endpoint (`/api/board`) backing the WebUI; loads
+  Buffer drafts and scheduled posts.
 - `settings.py` — reads and validates environment-backed configuration.
 - `cli.py` — local CLI for dry-run, end-to-end, and Buffer inspection.
+- `webui/` — React + shadcn/ui frontend for the access-locked content board.
 
 ## Prerequisites
 
@@ -269,35 +273,102 @@ List the configured Buffer channels:
 uv run python src/cli.py buffer_state
 ```
 
+## WebUI
+
+The Worker also serves a minimal kanban board at the root of its origin. The
+board shows two columns:
+
+- **Drafts** — Buffer posts awaiting review (`draft` status).
+- **Accepted** — posts a human scheduled for publication (`scheduled` status).
+
+The board is read-only for now; interactivity and further features come later.
+
+### Local configuration
+
+`wrangler.jsonc` is committed with `database_id` left blank so no account
+identifier is published. For local development, create
+`wrangler.local.jsonc` (gitignored) by copying `wrangler.jsonc` and filling in
+your D1 database ID:
+
+```bash
+npx wrangler d1 list                      # find your database_id
+sed 's/"database_id": ""/"database_id": "<your-database-id>"/' \
+  wrangler.jsonc > wrangler.local.jsonc
+```
+
+All `wrangler`/`pywrangler` commands below take `--config wrangler.local.jsonc`.
+
+### Building the frontend
+
+The WebUI is a React + Vite + shadcn/ui app in `webui/`. Its compiled output in
+`webui/dist` is deployed as a static asset by the Worker. Build it before
+deploying or running `wrangler dev`:
+
+```bash
+cd webui && npm install && npm run build
+```
+
+Run the full local stack (Worker + Vite hot reload) from the repo root:
+
+```bash
+./dev.sh
+```
+
+The UI is at `http://localhost:5173`; the Worker is at `http://localhost:8787`.
+`dev.sh` waits for the Worker to be ready, then starts Vite, and stops both on
+Ctrl-C. (`cd webui && npm run dev` does the same thing.)
+
+### Access lock
+
+The board is protected with Cloudflare Access (Zero Trust). Set it up once in
+the Cloudflare dashboard:
+
+1. Open **Zero Trust → Access → Applications** and create a Self-hosted
+   application for the Worker origin (for example,
+   `smm-agent.<subdomain>.workers.dev`).
+2. Add a policy for your team or email addresses.
+
+Access enforces the lock at the edge, so both the HTML and the `/api/board`
+endpoint are only reachable by signed-in users. No Worker-side auth logic is
+needed.
+
 ## Deploy
 
 The Worker deploys with `pywrangler`, the CLI for Cloudflare Python Workers.
 `pywrangler` bundles the Python dependencies into the Worker upload.
 
-1. Fill in the `database_id` in `wrangler.jsonc` with your D1 database ID
-   (find it with `npx wrangler d1 list`).
+1. Create `wrangler.local.jsonc` from `wrangler.jsonc` and fill in the
+   `database_id` (find it with `npx wrangler d1 list`). See
+   **Local configuration** above.
 2. Apply the D1 migrations to the remote database:
 
    ```bash
-   npx wrangler d1 migrations apply smm-agent-db --remote
+   npx wrangler d1 migrations apply smm-agent-db --remote --config wrangler.local.jsonc
    ```
 
 3. Set the secrets. Each command prompts for the value:
 
    ```bash
-   npx wrangler secret put OPENAI_API_KEY
-   npx wrangler secret put BUFFER_API_KEY
-   npx wrangler secret put BUFFER_ORGANIZATION_ID
-   npx wrangler secret put ASSET_PUBLIC_BASE_URL
+   npx wrangler secret put OPENAI_API_KEY --config wrangler.local.jsonc
+   npx wrangler secret put BUFFER_API_KEY --config wrangler.local.jsonc
+   npx wrangler secret put BUFFER_ORGANIZATION_ID --config wrangler.local.jsonc
+   npx wrangler secret put ASSET_PUBLIC_BASE_URL --config wrangler.local.jsonc
    ```
 
    For `ASSET_PUBLIC_BASE_URL`, use the deployed Worker origin (for example,
    `https://smm-agent.<subdomain>.workers.dev`) without a trailing path.
 
-4. Deploy the Worker:
+4. Build the WebUI so its static assets are included in the deployment:
 
    ```bash
-   PATH="/opt/homebrew/opt/node@22/bin:$PATH" uv run pywrangler deploy
+   cd webui && npm run build
+   ```
+
+5. Deploy the Worker:
+
+   ```bash
+   PATH="/opt/homebrew/opt/node@22/bin:$PATH" \
+     uv run pywrangler deploy --config wrangler.local.jsonc
    ```
 
 The cron trigger runs every Monday at 14:00 UTC (`0 14 * * MON`).

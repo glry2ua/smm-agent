@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .wrangler/
+wrangler.local.jsonc
 python_modules/
 node_modules/
 dist/
