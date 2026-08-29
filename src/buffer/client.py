@@ -29,6 +29,38 @@ mutation CreatePost($input: CreatePostInput!) {
 }
 """
 
+EDIT_POST_QUERY = """
+mutation EditPost($input: EditPostInput!) {
+  editPost(input: $input) {
+    ... on PostActionSuccess {
+      post {
+        id
+        text
+        dueAt
+        status
+        assets { id type mimeType source thumbnail }
+      }
+    }
+    ... on MutationError {
+      message
+    }
+  }
+}
+"""
+
+DELETE_POST_QUERY = """
+mutation DeletePost($input: DeletePostInput!) {
+  deletePost(input: $input) {
+    ... on DeletePostSuccess {
+      id
+    }
+    ... on VoidMutationError {
+      message
+    }
+  }
+}
+"""
+
 GET_CHANNELS_QUERY = """
 query GetChannels($organizationId: OrganizationId!) {
   channels(input: {
@@ -75,6 +107,11 @@ query GetPosts($input: PostsInput!, $first: Int!, $after: String) {
         via
         tags { id name color }
         assets { id type mimeType source thumbnail }
+        metadata {
+          __typename
+          ... on InstagramPostMetadata { type shouldShareToFeed }
+          ... on FacebookPostMetadata { type }
+        }
         metrics {
           type
           name
@@ -140,6 +177,7 @@ class BufferPost:
     via: str
     tags: tuple[dict[str, Any], ...]
     assets: tuple[dict[str, Any], ...]
+    metadata: dict[str, Any] | None
     metrics: tuple[BufferMetric, ...]
     metrics_updated_at: str | None
 
@@ -173,19 +211,34 @@ def _parse_metrics(raw_metrics: Any) -> tuple[BufferMetric, ...]:
     return tuple(parsed_metrics)
 
 
-def _channel_post_metadata(service: str) -> dict[str, Any] | None:
+def channel_post_metadata(
+    service: str,
+    *,
+    existing: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Return the per-network metadata Buffer requires for a scheduled post.
 
     Instagram and Facebook both require a non-null ``type`` (post, story, reel)
-    via the channel-specific ``metadata`` field. LinkedIn and other networks do
-    not require it, so ``None`` is returned and the field is omitted entirely.
+    via the channel-specific ``metadata`` field — and Buffer re-validates it on
+    *every* mutation, including edits, so it must always be sent. The post's
+    existing metadata (from the board) takes precedence so a story or reel is
+    never silently downgraded to a post. LinkedIn and other networks do not
+    require it, so ``None`` is returned and the field is omitted entirely.
     """
 
-    normalized = service.casefold()
+    normalized = service.casefold() if service else ""
+    existing = existing or {}
     if normalized == "instagram":
-        return {"instagram": {"type": "post", "shouldShareToFeed": True}}
+        current = existing.get("instagram") or {}
+        return {
+            "instagram": {
+                "type": str(current.get("type") or "post"),
+                "shouldShareToFeed": bool(current.get("shouldShareToFeed", True)),
+            }
+        }
     if normalized == "facebook":
-        return {"facebook": {"type": "post"}}
+        current = existing.get("facebook") or {}
+        return {"facebook": {"type": str(current.get("type") or "post")}}
     return None
 
 
@@ -207,10 +260,39 @@ def build_create_post_input(
         "saveToDraft": True,
         "aiAssisted": True,
     }
-    metadata = _channel_post_metadata(service)
+    metadata = channel_post_metadata(service)
     if metadata is not None:
         input_payload["metadata"] = metadata
     return input_payload
+
+
+def _parse_post_metadata(raw_metadata: Any) -> dict[str, Any] | None:
+    """Keep only the service keys the board needs to rebuild edit input."""
+
+    if not isinstance(raw_metadata, Mapping):
+        return None
+    key = {
+        "InstagramPostMetadata": "instagram",
+        "FacebookPostMetadata": "facebook",
+    }.get(str(raw_metadata.get("__typename") or ""))
+    if key is None:
+        return None
+    payload: dict[str, Any] = {"type": str(raw_metadata.get("type") or "")}
+    if key == "instagram":
+        payload["shouldShareToFeed"] = bool(raw_metadata.get("shouldShareToFeed", True))
+    return {key: payload}
+
+
+def _post_action_result(field: str, data: Mapping[str, Any]) -> dict[str, Any]:
+    """Unwrap a PostActionPayload union or raise with the MutationError message."""
+
+    action = data.get(field)
+    if not isinstance(action, Mapping):
+        raise BufferAPIError(f"Buffer response did not include a {field} result")
+    post_data = action.get("post")
+    if not isinstance(post_data, Mapping) or not post_data.get("id"):
+        raise BufferAPIError(str(action.get("message", "Buffer did not return a post")))
+    return dict(post_data)
 
 
 class BufferClient:
@@ -400,6 +482,7 @@ class BufferClient:
                         via=str(node.get("via") or ""),
                         tags=tuple(dict(tag) for tag in tags if isinstance(tag, Mapping)),
                         assets=tuple(dict(asset) for asset in assets if isinstance(asset, Mapping)),
+                        metadata=_parse_post_metadata(node.get("metadata")),
                         metrics=_parse_metrics(node.get("metrics")),
                         metrics_updated_at=(
                             str(node["metricsUpdatedAt"]) if node.get("metricsUpdatedAt") else None
@@ -452,3 +535,55 @@ class BufferClient:
         if not isinstance(post_data, Mapping) or not post_data.get("id"):
             raise BufferAPIError(str(action.get("message", "Buffer did not return a post ID")))
         return dict(post_data)
+
+    async def edit_post(
+        self,
+        post_id: str,
+        *,
+        text: str | None = None,
+        assets: list[dict[str, Any]] | None = None,
+        due_at: str | datetime | None = None,
+        mode: str | None = None,
+        scheduling_type: str | None = None,
+        save_to_draft: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Edit an existing post; omitted fields are preserved by Buffer.
+
+        ``due_at`` accepts a datetime or an ISO-8601 string. ``assets`` replaces
+        the ordered asset list (``None`` keeps the current list, ``[]`` clears it).
+        ``metadata`` should be provided for Instagram/Facebook posts — Buffer
+        re-validates the channel type on every edit.
+        """
+
+        input_payload: dict[str, Any] = {"id": post_id}
+        if text is not None:
+            input_payload["text"] = text
+        if assets is not None:
+            input_payload["assets"] = assets
+        if isinstance(due_at, datetime):
+            input_payload["dueAt"] = _utc_iso(due_at)
+        elif due_at is not None:
+            input_payload["dueAt"] = due_at
+        if mode is not None:
+            input_payload["mode"] = mode
+        if scheduling_type is not None:
+            input_payload["schedulingType"] = scheduling_type
+        if save_to_draft is not None:
+            input_payload["saveToDraft"] = save_to_draft
+        if metadata is not None:
+            input_payload["metadata"] = metadata
+        data = await self._graphql(EDIT_POST_QUERY, {"input": input_payload})
+        return _post_action_result("editPost", data)
+
+    async def delete_post(self, post_id: str) -> str:
+        """Delete a post and return the deleted post ID."""
+
+        data = await self._graphql(DELETE_POST_QUERY, {"input": {"id": post_id}})
+        action = data.get("deletePost")
+        if not isinstance(action, Mapping):
+            raise BufferAPIError("Buffer response did not include a deletePost result")
+        deleted_id = action.get("id")
+        if not deleted_id:
+            raise BufferAPIError(str(action.get("message", "Buffer did not confirm the delete")))
+        return str(deleted_id)

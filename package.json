@@ -5,5 +5,8 @@
   "scripts": {
     "dev": "bash dev.sh",
     "build:webui": "cd webui && npm run build"
+  },
+  "devDependencies": {
+    "wrangler": "^4.127.1"
   }
 }

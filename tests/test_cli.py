@@ -267,6 +267,7 @@ class BufferInsightsTest(IsolatedAsyncioTestCase):
                     assets=(),
                     metrics=(BufferMetric("reactions", "Reactions", 8, "count", ""),),
                     metrics_updated_at="2026-08-17T08:00:00Z",
+                    metadata=None,
                 )
             ],
             [],

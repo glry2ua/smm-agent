@@ -95,9 +95,9 @@ next draft.
 ## Repository layout
 
 ```
-agents/                 Agent prompt definitions (frontmatter + instructions)
 migrations/             D1 schema migrations
 src/                    Worker entrypoint, job orchestration, CLI, and modules
+                        (agent prompts are defined in src/agent_config.py)
 tests/                  Pytest suite
 webui/                  React + shadcn/ui frontend for the content board
 wrangler.jsonc          Cloudflare Worker configuration
@@ -311,12 +311,50 @@ cd webui && npm install && npm run build
 Run the full local stack (Worker + Vite hot reload) from the repo root:
 
 ```bash
+uv run pywrangler sync   # one-time: vendor Python deps into python_modules/ (required by wrangler)
 ./dev.sh
 ```
 
 The UI is at `http://localhost:5173`; the Worker is at `http://localhost:8787`.
 `dev.sh` waits for the Worker to be ready, then starts Vite, and stops both on
-Ctrl-C. (`cd webui && npm run dev` does the same thing.)
+Ctrl-C. (`cd webui && npm run dev` does the same thing.) If `wrangler dev` fails
+with `ModuleNotFoundError: No module named 'workers'`, `python_modules/` is
+missing — re-run `uv run pywrangler sync`.
+
+#### Dev runs against production resources (dev = prod)
+
+Local development is deliberately configured to exercise the exact production
+environment, so what you test locally is what ships:
+
+- **Remote bindings**: the `DB` (D1) and `ASSETS` (R2) bindings are marked
+  `"remote": true` in `wrangler.jsonc`. `wrangler dev` still executes the
+  Worker code locally (fast reload), but every binding call is proxied to the
+  real deployed D1 database and R2 bucket — the same ones production uses.
+  There is no separate dev database or bucket to seed or keep in sync.
+- **Secrets**: `dev.sh` regenerates `.dev.vars` from `.env` on every start, so
+  the local Worker uses the identical `OPENAI_API_KEY`, `BUFFER_API_KEY`,
+  `BUFFER_ORGANIZATION_ID`, and `ASSET_PUBLIC_BASE_URL` values as production.
+  Keep `.env` in sync with `wrangler secret put` values.
+- **Schema**: `dev.sh` applies D1 migrations with `--remote` before starting,
+  so the database is always on the current schema (migrations are idempotent).
+
+Because of this, board actions taken while developing (accept, edit, delete,
+image replace) mutate real live posts in Buffer. Treat local dev like a
+production console. The `remote` flags are ignored by `wrangler deploy`.
+
+### Board API
+
+The dashboard reads real Buffer data and mutates it through the Worker:
+
+| Route | Method | Body | Effect |
+| --- | --- | --- | --- |
+| `/api/board` | GET | — | Channels + draft/scheduled posts for the last 30 / next 90 days |
+| `/api/posts` | PATCH | `{posts:[{id,service?,metadata?}], text}` | Edit post text (all posts in a group) |
+| `/api/posts/accept` | POST | `{posts:[…], due_at?}` | Schedule drafts (keeps their scheduled time) |
+| `/api/posts/delete` | POST | `{posts:[…]}` | Delete the posts from Buffer |
+| `/api/posts/image` | POST | `{posts:[…], image:{data}}` | Store a custom image in R2 and set it as the post asset |
+| `/api/posts/image/ai` | POST | `{posts:[…], url, instruction}` | Edit the current image with GPT Image and set the result as the post asset |
+| `/api/posts/rewrite` | POST | `{post_id, text, instruction}` | Prompt-based AI edit of the text (single fast model call) |
 
 ### Access lock
 

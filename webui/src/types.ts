@@ -22,6 +22,7 @@ export interface BoardPost {
   due_at: string | null
   sent_at: string | null
   assets: BoardAsset[]
+  metadata: Record<string, unknown> | null
 }
 
 export interface Board {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
 
 import { BoardColumn } from "@/components/board-column"
@@ -8,6 +8,7 @@ import { Kanban, KanbanBoard } from "@/components/ui/kanban"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useBoard } from "@/hooks/use-board"
 import { groupPosts } from "@/lib/grouping"
+import { cn } from "@/lib/utils"
 import type { GroupedPost } from "@/types"
 
 const COLUMNS: { key: string; title: string; emptyLabel: string }[] = [
@@ -21,23 +22,13 @@ function formatFetchedAt(value: string): string {
   return date.toLocaleString()
 }
 
-function BoardSkeleton() {
-  return (
-    <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2">
-      {COLUMNS.map((col) => (
-        <div key={col.key} className="flex flex-col gap-2.5">
-          <Skeleton className="h-5 w-32" />
-          {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-44 w-full" />
-          ))}
-        </div>
-      ))}
-    </div>
-  )
+interface Toast {
+  id: number
+  message: string
 }
 
 export default function App() {
-  const { board, error, loading } = useBoard()
+  const { board, error, loading, refreshing, refresh } = useBoard()
   const [columns, setColumns] = useState<Record<string, GroupedPost[]>>({
     drafts: [],
     accepted: [],
@@ -45,6 +36,16 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false)
   const [openGroup, setOpenGroup] = useState<GroupedPost | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const nextToastId = useRef(1)
+
+  const notify = useCallback((message: string) => {
+    const id = nextToastId.current++
+    setToasts((prev) => [...prev, { id, message }])
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    }, 5000)
+  }, [])
 
   useEffect(() => {
     if (board && !hydrated) {
@@ -56,84 +57,110 @@ export default function App() {
     }
   }, [board, hydrated])
 
+  // Keep the open post in sync with fresh board data; close it if the post
+  // disappeared (e.g. deleted in Buffer while the modal was open).
+  useEffect(() => {
+    if (!board || !openGroup || !modalOpen) return
+    const all = [...groupPosts(board.drafts), ...groupPosts(board.accepted)]
+    const fresh = all.find((g) => g.key === openGroup.key)
+    if (fresh) {
+      setOpenGroup(fresh)
+    } else {
+      setOpenGroup(null)
+      setModalOpen(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board])
+
   const handleOpen = (group: GroupedPost) => {
     setOpenGroup(group)
     setModalOpen(true)
   }
 
-  const removeGroupFromColumns = (group: GroupedPost) => {
-    setColumns((prev) => {
-      const next: Record<string, GroupedPost[]> = {}
-      for (const [col, groups] of Object.entries(prev)) {
-        next[col] = groups.filter((g) => g.key !== group.key)
-      }
-      return next
-    })
+  const handleAccepted = () => {
+    setHydrated(false)
+    setModalOpen(false)
+    setOpenGroup(null)
+    refresh()
   }
 
-  const handleAccept = (_group: GroupedPost) => {
-    // UI-only for now; wiring to Buffer comes later.
-    setModalOpen(false)
+  const handleChange = () => {
+    setHydrated(false)
+    refresh()
   }
-  const handleEdit = (_group: GroupedPost) => {
-    // UI-only for now; wiring to Buffer comes later.
-    setModalOpen(false)
-  }
-  const handleDelete = (group: GroupedPost) => {
-    removeGroupFromColumns(group)
-    setModalOpen(false)
-  }
+
+  // Nothing on screen yet: the first fetch is in flight, so every column shows
+  // cards taking shape. Background refreshes keep the real cards and dim them.
+  const showSkeletons = board === null && error === null
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-6">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Content Board</h1>
-          {board && (
+          {board ? (
             <p className="text-muted-foreground text-sm">
               Last updated {formatFetchedAt(board.fetched_at)}
             </p>
-          )}
+          ) : showSkeletons ? (
+            <Skeleton className="mt-1.5 h-4 w-52" />
+          ) : null}
         </div>
-        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-          <RefreshCw />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refresh()}
+          disabled={loading}
+        >
+          <RefreshCw className={cn(refreshing && "animate-spin")} />
           Refresh
         </Button>
       </header>
 
-      {loading && <BoardSkeleton />}
-
-      {!loading && error && (
+      {!board && error ? (
         <div className="flex flex-col items-center gap-3 py-16 text-center">
           <p className="text-muted-foreground">Unable to load the content board.</p>
           <p className="text-destructive text-sm">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+          <Button variant="outline" size="sm" onClick={() => refresh()}>
             <RefreshCw />
             Retry
           </Button>
         </div>
-      )}
-
-      {!loading && !error && board && (
-        <Kanban
-          value={columns}
-          onValueChange={setColumns}
-          getItemValue={(group) => group.key}
-        >
-          <KanbanBoard className="grid-cols-1 md:grid-cols-2">
-            {COLUMNS.map((col) => (
-              <BoardColumn
-                key={col.key}
-                title={col.title}
-                columnValue={col.key}
-                groups={columns[col.key] ?? []}
-                channels={board.channels}
-                emptyLabel={col.emptyLabel}
-                onOpen={handleOpen}
-              />
-            ))}
-          </KanbanBoard>
-        </Kanban>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {/* A failed background refresh keeps the stale board on screen. */}
+          {board && error && (
+            <p className="text-destructive text-sm">Couldn’t refresh: {error}</p>
+          )}
+          <Kanban
+            value={columns}
+            onValueChange={setColumns}
+            getItemValue={(group) => group.key}
+            disabled
+          >
+            <KanbanBoard
+              className={cn(
+                "grid-cols-1 md:grid-cols-2",
+                refreshing &&
+                  !showSkeletons &&
+                  "opacity-70 transition-opacity duration-200",
+              )}
+            >
+              {COLUMNS.map((col) => (
+                <BoardColumn
+                  key={col.key}
+                  title={col.title}
+                  columnValue={col.key}
+                  groups={columns[col.key] ?? []}
+                  channels={board?.channels ?? []}
+                  emptyLabel={col.emptyLabel}
+                  onOpen={handleOpen}
+                  loading={showSkeletons}
+                />
+              ))}
+            </KanbanBoard>
+          </Kanban>
+        </div>
       )}
 
       <PostModal
@@ -141,10 +168,21 @@ export default function App() {
         channels={board?.channels ?? []}
         open={modalOpen}
         onOpenChange={setModalOpen}
-        onAccept={handleAccept}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
+        onAccepted={handleAccepted}
+        onChanged={handleChange}
+        notify={notify}
       />
+
+      <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="bg-primary text-primary-foreground rounded-full px-4 py-2 text-sm font-medium shadow-lg"
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
     </main>
   )
 }

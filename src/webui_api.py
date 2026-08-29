@@ -36,6 +36,7 @@ def _card(post: Any, channel_id: str) -> dict[str, Any]:
         "due_at": post.due_at,
         "sent_at": post.sent_at,
         "assets": assets,
+        "metadata": post.metadata,
     }
 
 

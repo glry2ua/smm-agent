@@ -12,6 +12,7 @@ interface KanbanContextValue {
   setOverColumn: (col: string | null) => void
   overItemId: string | null
   setOverItemId: (id: string | null) => void
+  disabled: boolean
 }
 
 const KanbanContext = React.createContext<KanbanContextValue | null>(null)
@@ -26,19 +27,22 @@ interface KanbanProps<T> {
   value: Record<string, T[]>
   onValueChange: (value: Record<string, T[]>) => void
   getItemValue: (item: T) => string
+  /** Disable drag-and-drop: cards can only be opened and acted on via buttons. */
+  disabled?: boolean
   children: React.ReactNode
 }
 
-function Kanban<T>({ value, onValueChange, getItemValue, children }: KanbanProps<T>) {
+function Kanban<T>({ value, onValueChange, getItemValue, disabled = false, children }: KanbanProps<T>) {
   const [draggingId, setDraggingId] = React.useState<string | null>(null)
   const [overColumn, setOverColumn] = React.useState<string | null>(null)
   const [overItemId, setOverItemId] = React.useState<string | null>(null)
 
   const onMove = React.useCallback(
     (itemId: string, toColumn: string, beforeItemId: string | null) => {
+      if (disabled) return
       onValueChange(moveItem(value, getItemValue, itemId, toColumn, beforeItemId))
     },
-    [value, onValueChange, getItemValue],
+    [value, onValueChange, getItemValue, disabled],
   )
 
   const ctx: KanbanContextValue = {
@@ -51,6 +55,7 @@ function Kanban<T>({ value, onValueChange, getItemValue, children }: KanbanProps
     setOverColumn,
     overItemId,
     setOverItemId,
+    disabled,
   }
 
   return <KanbanContext.Provider value={ctx}>{children}</KanbanContext.Provider>
@@ -140,7 +145,8 @@ function KanbanColumnHeader({
   className,
 }: {
   title: string
-  count: number
+  /** Hidden while the column is still loading; pass null for no badge. */
+  count: number | null
   className?: string
 }) {
   return (
@@ -152,9 +158,11 @@ function KanbanColumnHeader({
       )}
     >
       <span className="line-clamp-1">{title}</span>
-      <span className="text-muted-foreground inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1.5 text-[11px] tabular-nums">
-        {count}
-      </span>
+      {count !== null && (
+        <span className="text-muted-foreground inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1.5 text-[11px] tabular-nums">
+          {count}
+        </span>
+      )}
     </div>
   )
 }
@@ -184,8 +192,12 @@ function KanbanItem({
   return (
     <div
       data-slot="kanban-item"
-      draggable
+      draggable={!ctx.disabled}
       onDragStart={(e) => {
+        if (ctx.disabled) {
+          e.preventDefault()
+          return
+        }
         ctx.setDraggingId(itemId)
         e.dataTransfer.effectAllowed = "move"
       }}
@@ -195,12 +207,13 @@ function KanbanItem({
         ctx.setOverItemId(null)
       }}
       onDragOver={(e) => {
-        if (ctx.draggingId === null || ctx.draggingId === itemId) return
+        if (ctx.disabled || ctx.draggingId === null || ctx.draggingId === itemId) return
         e.preventDefault()
         ctx.setOverItemId(itemId)
       }}
       className={cn(
-        "cursor-grab rounded-lg border bg-card text-card-foreground shadow-sm transition-opacity active:cursor-grabbing",
+        "rounded-lg border bg-card text-card-foreground shadow-sm transition-opacity",
+        ctx.disabled ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-40",
         isOver && "ring-2 ring-ring",
         className,

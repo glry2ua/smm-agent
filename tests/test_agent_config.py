@@ -1,19 +1,23 @@
-from pathlib import Path
 from unittest import TestCase
 
 from agent_config import AgentConfigError, load_agent, render_agent
 
-AGENTS = Path(__file__).parents[1] / "agents"
-
 
 class AgentConfigTest(TestCase):
-    def test_loads_frontmatter_and_model_thinking_suffix(self) -> None:
-        config = load_agent("social-post-editor", directory=AGENTS)
+    def test_loads_model_and_thinking_from_the_code_registry(self) -> None:
+        config = load_agent("social-post-editor")
 
         self.assertEqual(config.model, "gpt-5.6-luna")
         self.assertEqual(config.thinking, "xhigh")
         self.assertEqual(config.verbosity, "low")
         self.assertIn("You are the social media editor", config.instructions)
+
+    def test_registers_every_worker_agent(self) -> None:
+        for name in ("social-post-editor", "performance-analyst", "image-renderer"):
+            config = load_agent(name)
+            self.assertEqual(config.name, name)
+            self.assertTrue(config.instructions.strip())
+            self.assertTrue(config.model.strip())
 
     def test_renders_dynamic_values_without_leaving_placeholders(self) -> None:
         rendered = render_agent(
@@ -24,7 +28,6 @@ class AgentConfigTest(TestCase):
                 "available_images": "- No reference images available.",
                 "contact_facts": "- No contact info.",
             },
-            directory=AGENTS,
         )
 
         self.assertIn("Test topic", rendered)
@@ -33,15 +36,8 @@ class AgentConfigTest(TestCase):
 
     def test_rejects_missing_template_values(self) -> None:
         with self.assertRaisesRegex(AgentConfigError, "topic"):
-            render_agent("social-post-editor", {}, directory=AGENTS)
+            render_agent("social-post-editor", {})
 
-    def test_rejects_unknown_frontmatter_keys(self) -> None:
-        path = AGENTS / "invalid.md"
-        path.write_text(
-            "---\ndescription: Invalid\nmodel: example#high\nowner: test\n---\nPrompt\n",
-            encoding="utf-8",
-        )
-        self.addCleanup(path.unlink)
-
-        with self.assertRaisesRegex(AgentConfigError, "owner"):
-            load_agent("invalid", directory=AGENTS)
+    def test_rejects_unknown_agents_with_available_names(self) -> None:
+        with self.assertRaisesRegex(AgentConfigError, "performance-analyst"):
+            load_agent("nonexistent")

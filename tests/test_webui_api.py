@@ -57,6 +57,7 @@ def buffer_post(
         ),
         metrics=(),
         metrics_updated_at=None,
+        metadata=None,
     )
 
 

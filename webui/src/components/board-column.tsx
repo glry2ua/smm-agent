@@ -1,3 +1,5 @@
+import { SkeletonImage } from "@/components/skeleton-image"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   KanbanColumn,
   KanbanColumnContent,
@@ -5,6 +7,7 @@ import {
   KanbanItem,
 } from "@/components/ui/kanban"
 import { PlatformIcon } from "@/components/ui/platform-icon"
+import { cn } from "@/lib/utils"
 import type { BoardChannel, GroupedPost } from "@/types"
 
 function channelFor(
@@ -54,11 +57,11 @@ function PostCard({
       onClick={() => onOpen(group)}
     >
       {imageUrl && (
-        <div className="mx-auto w-24 overflow-hidden rounded-md p-2">
-          <img
+        <div className="mx-auto w-24 p-2">
+          <SkeletonImage
             src={imageUrl}
             alt=""
-            className="aspect-square w-full object-cover"
+            imgClassName="aspect-square w-full object-cover"
             loading="lazy"
           />
         </div>
@@ -84,6 +87,33 @@ function PostCard({
   )
 }
 
+/**
+ * Placeholder that mirrors PostCard's real geometry (same card shell, same
+ * 96px thumbnail box, same two clamped text lines, same footer row) so cards
+ * swapping in never move the layout.
+ */
+export function PostCardSkeleton({ withImage = true }: { withImage?: boolean }) {
+  return (
+    <div className="bg-card overflow-hidden rounded-lg border">
+      {withImage && (
+        <div className="mx-auto w-24 p-2">
+          <Skeleton className="aspect-square w-full" />
+        </div>
+      )}
+      <div className="flex flex-col gap-1 p-2">
+        <Skeleton className={cn("h-2.5", withImage ? "w-full" : "w-11/12")} />
+        <Skeleton className="h-2.5 w-2/3" />
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1">
+            <Skeleton className="size-3 rounded-full" />
+          </div>
+          <Skeleton className="h-2.5 w-16" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function BoardColumn({
   title,
   columnValue,
@@ -91,6 +121,8 @@ export function BoardColumn({
   channels,
   emptyLabel,
   onOpen,
+  loading = false,
+  skeletonCards = 2,
 }: {
   title: string
   columnValue: string
@@ -98,12 +130,25 @@ export function BoardColumn({
   channels: BoardChannel[]
   emptyLabel: string
   onOpen: (group: GroupedPost) => void
+  /** Render placeholder cards instead of the (empty) real ones. */
+  loading?: boolean
+  skeletonCards?: number
 }) {
   return (
     <KanbanColumn value={columnValue}>
-      <KanbanColumnHeader title={title} count={groups.length} />
-      <KanbanColumnContent>
-        {groups.length === 0 ? (
+      <KanbanColumnHeader
+        title={title}
+        count={loading ? null : groups.length}
+      />
+      <KanbanColumnContent aria-busy={loading || undefined}>
+        {loading ? (
+          <>
+            <span className="sr-only">Loading {title.toLowerCase()}…</span>
+            {Array.from({ length: skeletonCards }, (_, i) => (
+              <PostCardSkeleton key={i} withImage={i % 2 === 0} />
+            ))}
+          </>
+        ) : groups.length === 0 ? (
           <p className="text-muted-foreground px-1 py-2 text-sm">{emptyLabel}</p>
         ) : (
           groups.map((group) => (

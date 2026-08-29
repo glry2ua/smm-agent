@@ -1,4 +1,5 @@
 .env*
+.dev.vars
 !.env.example
 .venv/
 .venv-workers/
@@ -15,3 +16,10 @@ node_modules/
 dist/
 dry_run_outputs/
 pylock.toml
+
+# Local sandbox caches (project-local package manager caches)
+.uv-cache/
+.uv-python/
+.npm-cache/
+
+.wrangler-dry-check/

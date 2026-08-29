@@ -2,6 +2,11 @@
 # Run the full local dev stack: Cloudflare Worker (serves /api and /assets) +
 # Vite dev server (serves the React UI with hot reload). One command, Ctrl-C
 # stops both.
+#
+# Dev = prod: the DB and ASSETS bindings use remote bindings (see
+# wrangler.jsonc), so the Worker runs locally but reads/writes the exact
+# production D1 database, R2 bucket, and secrets. There is no separate dev
+# database; anything you do locally happens for real.
 set -euo pipefail
 
 # Run from the repo root regardless of where it was invoked from.
@@ -28,6 +33,30 @@ if [ ! -f wrangler.local.jsonc ]; then
   echo "   sed 's/\"database_id\": \"\"/\"database_id\": \"<id>\"/' wrangler.jsonc > wrangler.local.jsonc" >&2
   exit 1
 fi
+
+# Dev = prod: remote bindings (see wrangler.jsonc) point the DB and ASSETS
+# bindings at the real deployed D1 and R2, so local runs exercise the exact
+# production resources. Secrets must therefore match production exactly too:
+# regenerate .dev.vars from .env on every start so they never drift.
+if [ -f .env ]; then
+  grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env > .dev.vars
+  echo ">> Synced .env -> .dev.vars ($(grep -cE '=' .dev.vars) vars)"
+else
+  echo "!! .env not found." >&2
+  echo "   wrangler dev needs it for OPENAI_API_KEY / BUFFER_API_KEY / etc." >&2
+  exit 1
+fi
+
+# Local wrangler dev bundles Python deps from python_modules/ (gitignored).
+if [ ! -d python_modules ]; then
+  echo "!! python_modules/ missing." >&2
+  echo "   Run: uv run pywrangler sync" >&2
+  exit 1
+fi
+
+# Keep the remote schema in sync; migrations are idempotent (no-op when done).
+npx wrangler d1 migrations apply smm-agent-db --remote --config wrangler.local.jsonc
+echo ">> D1 schema up to date (remote)."
 
 # Start the Worker in the background (serves /api/board, /health, /assets/*).
 npx wrangler dev --port 8787 --local --config wrangler.local.jsonc &
