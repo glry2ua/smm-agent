@@ -27,7 +27,17 @@ export function useBoard(): BoardState {
     fetch("/api/board")
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error(`Board request failed with status ${response.status}`)
+          // Prefer the server's error message over a bare status code.
+          let message = `Board request failed with status ${response.status}`
+          try {
+            const body = (await response.json()) as { error?: unknown }
+            if (body && typeof body.error === "string" && body.error.trim()) {
+              message = body.error
+            }
+          } catch {
+            // non-JSON error body: keep the status-code message
+          }
+          throw new Error(message)
         }
         return response.json() as Promise<Board>
       })

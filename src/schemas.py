@@ -70,9 +70,19 @@ class ImagePrompt(BaseModel):
     ) -> str:
         """Render the validated fields into the prompt sent to GPT Image 2."""
 
-        supporting_text = self.supporting_text or "No supporting text"
-        must_include = "; ".join(self.must_include) or "No additional elements"
-        avoid = "; ".join(self.avoid) or "No additional exclusions"
+        copy_lines = [
+            line
+            for line in (
+                (
+                    f"- Render this exact supporting text at most once: {self.supporting_text}"
+                    if self.supporting_text
+                    else None
+                ),
+                f"- Must include: {'; '.join(self.must_include)}" if self.must_include else None,
+                f"- Avoid: {'; '.join(self.avoid)}" if self.avoid else None,
+            )
+            if line is not None
+        ]
         reference_lines: list[str] = []
         reference_roles: list[str] = []
         for index, image in enumerate(reference_images or [], start=1):
@@ -107,7 +117,7 @@ class ImagePrompt(BaseModel):
             )
         business_details = (
             "\n".join(requested_business_details)
-            or "- No business identity or contact details requested"
+            or "- None. Do not render any business identity or contact details."
         )
         return render_agent(
             "image-renderer",
@@ -118,12 +128,10 @@ class ImagePrompt(BaseModel):
                 "setting": self.setting,
                 "composition": self.composition,
                 "headline": self.headline,
-                "supporting_text": supporting_text,
-                "must_include": must_include,
+                "copy_lines": "\n".join(copy_lines),
                 "business_details": business_details,
                 "references": references,
                 "people_constraint": people_constraint,
-                "avoid": avoid,
             },
         )
 

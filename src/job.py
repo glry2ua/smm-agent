@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,8 @@ PUBLISH_TIME = time(hour=8, minute=30)
 PUBLISH_DAY_OFFSETS = (0, 2, 4)
 CRON_TIME_UTC = time(hour=14)
 MAX_POST_COUNT = len(PUBLISH_DAY_OFFSETS)
+# Never stall a run waiting out a rate-limit window longer than this.
+MAX_RETRY_DELAY_SECONDS = 30.0
 MAX_DRAFT_ATTEMPTS = 3
 
 
@@ -220,7 +224,7 @@ async def _with_retries[T](
         except Exception:
             if attempt == max_attempts:
                 raise
-            await asyncio.sleep(backoff_seconds * (2 ** (attempt - 1)))
+            await asyncio.sleep(min(backoff_seconds * (2 ** (attempt - 1)), MAX_RETRY_DELAY_SECONDS))
     raise RuntimeError("unreachable")
 
 
@@ -237,8 +241,92 @@ async def _list_channels_with_retries(
         except BufferAPIError as exc:
             if not exc.retryable or attempt == max_attempts:
                 raise
-            await asyncio.sleep(backoff_seconds * (2 ** (attempt - 1)))
+            # Prefer the server's Retry-After over plain exponential backoff,
+            # but never stall a run for minutes waiting on a rate-limit window.
+            delay = exc.retry_after if exc.retry_after else backoff_seconds * (2 ** (attempt - 1))
+            delay = min(delay, MAX_RETRY_DELAY_SECONDS)
+            print(
+                f"Buffer unavailable (HTTP {exc.status_code or 'error'}); "
+                f"retry {attempt}/{max_attempts} in {delay:.0f}s...",
+                file=sys.stderr,
+                flush=True,
+            )
+            await asyncio.sleep(delay)
     raise RuntimeError("unreachable")
+
+
+def _load_cached_channels(cache_path: Path) -> list[BufferChannel] | None:
+    try:
+        payload = json.loads(cache_path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, list):
+        return None
+    channels = [
+        BufferChannel(
+            id=str(entry["id"]),
+            name=str(entry.get("name") or ""),
+            display_name=str(entry.get("display_name") or entry.get("displayName") or ""),
+            service=str(entry.get("service") or ""),
+        )
+        for entry in payload
+        if isinstance(entry, dict) and entry.get("id")
+    ]
+    return channels or None
+
+
+def _store_cached_channels(cache_path: Path, channels: list[BufferChannel]) -> None:
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps([asdict(channel) for channel in channels], indent=2))
+    except OSError:
+        pass  # caching is best-effort; never fail a run over it
+
+
+async def _channels_for_run(
+    client: BufferClient,
+    organization_id: str,
+    *,
+    dry_run: bool,
+    cache_path: Path | None,
+    channel_service: str | None,
+    max_attempts: int,
+    backoff_seconds: float,
+) -> tuple[list[BufferChannel], str]:
+    """Resolve the channel list for this run.
+
+    Live runs always query Buffer (and persist a cache copy for dry-runs).
+    Dry-runs never call Buffer: they reuse the cached channel list when one
+    exists, otherwise they fall back to a placeholder channel so local runs
+    can test topic selection, reference-image pulls, and image generation
+    without any Buffer dependency.
+    """
+
+    if dry_run:
+        if cache_path is not None:
+            cached = _load_cached_channels(cache_path)
+            if cached is not None:
+                return cached, "cache"
+        return (
+            [
+                BufferChannel(
+                    id="local-dry-run",
+                    name="local-dry-run",
+                    display_name="Local Dry Run",
+                    service=(channel_service or "linkedin").casefold(),
+                )
+            ],
+            "placeholder",
+        )
+    channels = await _list_channels_with_retries(
+        client,
+        organization_id,
+        max_attempts=max_attempts,
+        backoff_seconds=backoff_seconds,
+    )
+    if cache_path is not None and channels:
+        _store_cached_channels(cache_path, channels)
+    return channels, "buffer"
 
 
 async def _prepare_performance_analysis(
@@ -278,6 +366,8 @@ async def run_weekly_job(
     local_image_dir: Path | None = None,
     now: datetime | None = None,
     force_non_monday: bool = False,
+    skip_performance_analysis: bool = False,
+    channels_cache_path: Path | None = None,
 ) -> dict[str, Any]:
     if post_count not in range(1, MAX_POST_COUNT + 1):
         raise ValueError(f"post_count must be between 1 and {MAX_POST_COUNT}")
@@ -304,13 +394,10 @@ async def run_weekly_job(
             f"{len(due_times)} unused topics are required, but only {len(topics)} remain"
         )
     references = reference_store
-    if references is None:
-        if dry_run:
-            references = None
-        elif asset_store is None:
-            references = R2ImageAssetStore.from_env(env)
-        elif callable(getattr(asset_store, "get_reference_image", None)):
-            references = asset_store  # type: ignore[assignment]
+    if references is None and asset_store is None and not dry_run:
+        references = R2ImageAssetStore.from_env(env)
+    if references is None and callable(getattr(asset_store, "get_reference_image", None)):
+        references = asset_store  # type: ignore[assignment]
     brands = brand_store
     if brands is None and isinstance(references, R2ImageAssetStore):
         brands = references
@@ -321,11 +408,26 @@ async def run_weekly_job(
     reference_assets = _reference_assets(listed_reference_keys, include_logo=brands is not None)
     reference_catalog = [asset.key for asset in reference_assets]
     asset_catalog = {asset.key: asset for asset in reference_assets}
+    if len(reference_catalog) <= 1:
+        # The logo is injected separately; a logo-only catalog means the R2
+        # listing returned nothing usable. Show what the bucket actually
+        # returned so the cause (empty bucket, unmapped folder, API shape)
+        # is visible instead of silently generating without references.
+        sample = ", ".join(listed_reference_keys[:10]) or "(listing returned no image keys)"
+        print(
+            "WARNING: R2 reference catalog is logo-only. "
+            f"R2 listing returned {len(listed_reference_keys)} usable key(s): {sample}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     client = BufferClient(settings.buffer_api_key, api_url=settings.buffer_api_url)
-    channels = await _list_channels_with_retries(
+    channels, channels_source = await _channels_for_run(
         client,
         settings.buffer_organization_id,
+        dry_run=dry_run,
+        cache_path=channels_cache_path,
+        channel_service=channel_service,
         max_attempts=settings.retry_max_attempts,
         backoff_seconds=settings.retry_backoff_seconds,
     )
@@ -342,12 +444,18 @@ async def run_weekly_job(
             )
         raise RuntimeError("The Buffer organization has no available channels")
 
-    (
-        insights_snapshot,
-        performance_analysis,
-        performance_analysis_status,
-        performance_analysis_error,
-    ) = await _prepare_performance_analysis(client, settings, current, channels)
+    if skip_performance_analysis:
+        insights_snapshot = None
+        performance_analysis = None
+        performance_analysis_status = "skipped"
+        performance_analysis_error = None
+    else:
+        (
+            insights_snapshot,
+            performance_analysis,
+            performance_analysis_status,
+            performance_analysis_error,
+        ) = await _prepare_performance_analysis(client, settings, current, channels)
     draft_preparations = await asyncio.gather(
         *(
             _generate_valid_draft(
@@ -437,6 +545,9 @@ async def run_weekly_job(
         "images_generated": len(generated_images),
         "buffer_inputs": buffer_inputs,
         "channel_count": len(channels),
+        "channels_source": channels_source,
+        "reference_catalog": reference_catalog,
+        "listed_reference_key_count": len(listed_reference_keys),
         "channel_service_filter": channel_service,
         "buffer_insights_summary": (
             {

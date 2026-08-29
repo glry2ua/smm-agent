@@ -1,3 +1,5 @@
+import json
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, TestCase
@@ -6,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from brand.brand_context import ContactInfo, ReferenceAsset
 from buffer.client import BufferAPIError, BufferChannel
 from images.image_pipeline import GeneratedImage, ReferenceImage
+import job
 from job import (
     _generate_and_save,
     _generate_valid_draft,
@@ -162,6 +165,297 @@ class PostCountRunTest(IsolatedAsyncioTestCase):
         self.assertEqual(result["images_generated"], 1)
         self.assertEqual(len(result["buffer_inputs"]), 1)
 
+    async def test_skip_performance_analysis_flag_avoids_buffer_insight_queries(self) -> None:
+        class FakeTopicStore:
+            async def pick_random_available(self, limit: int = 1) -> list[Topic]:
+                return [Topic(id=1, topic="One focused topic")]
+
+            async def mark_used(self, topic_id: int, used_at: datetime) -> None:
+                del topic_id, used_at
+
+        async def generate_draft(
+            settings: Settings,
+            topic: str,
+            due_at: datetime,
+            reference_image_keys: list[str],
+            analysis: PerformanceAnalysis | None,
+        ) -> SocialPostDraft:
+            del settings, topic, reference_image_keys, analysis
+            return SocialPostDraft(
+                description="One post",
+                keywords=["one", "two", "three"],
+                image_prompt=image_prompt(),
+                due_at=due_at,
+            )
+
+        env = {
+            "OPENAI_API_KEY": "openai-key",
+            "OPENAI_IMAGE_MODEL": "gpt-image-2",
+            "OPENAI_IMAGE_WIDTH": "1088",
+            "OPENAI_IMAGE_HEIGHT": "1360",
+            "OPENAI_IMAGE_QUALITY": "medium",
+            "BUFFER_API_KEY": "buffer-key",
+            "BUFFER_ORGANIZATION_ID": "organization-id",
+            "BUFFER_API_URL": "https://api.buffer.com",
+            "MIN_SCHEDULE_LEAD_MINUTES": "30",
+            "SCHEDULE_HORIZON_DAYS": "8",
+            "MAX_POST_CHARS": "5000",
+            "RETRY_MAX_ATTEMPTS": "3",
+            "RETRY_BACKOFF_SECONDS": "1",
+        }
+        channel = BufferChannel(
+            id="channel-1",
+            name="channel",
+            display_name="Channel",
+            service="linkedin",
+        )
+
+        with (
+            patch("job.generate_social_post", new=AsyncMock(side_effect=generate_draft)),
+            patch(
+                "job._prepare_performance_analysis",
+                new=AsyncMock(side_effect=AssertionError("perf analysis must not run")),
+            ),
+            patch(
+                "job.generate_and_save_image",
+                new=AsyncMock(
+                    return_value=GeneratedImage(
+                        key="generated_graphics/topic-1.png",
+                        url=None,
+                        model="gpt-image-2",
+                        size="1024x1536",
+                        quality="medium",
+                        local_path_absolute="/tmp/topic-1.png",
+                        local_path_relative="topic-1.png",
+                    )
+                ),
+            ),
+            patch("job.BufferClient") as client_class,
+        ):
+            client = client_class.return_value
+            client.list_available_channels = AsyncMock(return_value=[channel])
+
+            result = await run_weekly_job(
+                env,
+                dry_run=True,
+                post_count=1,
+                topic_store=FakeTopicStore(),
+                local_image_dir=Path("/tmp"),
+                now=datetime(2026, 8, 17, 14, tzinfo=UTC),
+                skip_performance_analysis=True,
+            )
+
+        self.assertEqual(result["performance_analysis_status"], "skipped")
+        self.assertIsNone(result["performance_analysis"])
+        self.assertIsNone(result["buffer_insights_summary"])
+
+    async def test_dry_run_uses_cached_channels_without_calling_buffer(self) -> None:
+        cache_dir = Path(tempfile.mkdtemp())
+        cache_path = cache_dir / "buffer_channels.json"
+        cache_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "channel-cached",
+                        "name": "cached",
+                        "display_name": "Cached Channel",
+                        "service": "instagram",
+                    }
+                ]
+            )
+        )
+
+        class FakeTopicStore:
+            async def pick_random_available(self, limit: int = 1) -> list[Topic]:
+                return [Topic(id=1, topic="One focused topic")]
+
+            async def mark_used(self, topic_id: int, used_at: datetime) -> None:
+                del topic_id, used_at
+
+        async def generate_draft(
+            settings: Settings,
+            topic: str,
+            due_at: datetime,
+            reference_image_keys: list[str],
+            analysis: PerformanceAnalysis | None,
+        ) -> SocialPostDraft:
+            del settings, topic, reference_image_keys, analysis
+            return SocialPostDraft(
+                description="One post",
+                keywords=["one", "two", "three"],
+                image_prompt=image_prompt(),
+                due_at=due_at,
+            )
+
+        env = {
+            "OPENAI_API_KEY": "openai-key",
+            "OPENAI_IMAGE_MODEL": "gpt-image-2",
+            "OPENAI_IMAGE_WIDTH": "1088",
+            "OPENAI_IMAGE_HEIGHT": "1360",
+            "OPENAI_IMAGE_QUALITY": "medium",
+            "BUFFER_API_KEY": "buffer-key",
+            "BUFFER_ORGANIZATION_ID": "organization-id",
+            "BUFFER_API_URL": "https://api.buffer.com",
+            "MIN_SCHEDULE_LEAD_MINUTES": "30",
+            "SCHEDULE_HORIZON_DAYS": "8",
+            "MAX_POST_CHARS": "5000",
+            "RETRY_MAX_ATTEMPTS": "3",
+            "RETRY_BACKOFF_SECONDS": "1",
+        }
+
+        with (
+            patch("job.generate_social_post", new=AsyncMock(side_effect=generate_draft)),
+            patch(
+                "job._prepare_performance_analysis",
+                new=AsyncMock(return_value=(None, None, "not_run", None)),
+            ),
+            patch(
+                "job.generate_and_save_image",
+                new=AsyncMock(
+                    return_value=GeneratedImage(
+                        key="generated_graphics/topic-1.png",
+                        url=None,
+                        model="gpt-image-2",
+                        size="1024x1536",
+                        quality="medium",
+                        local_path_absolute="/tmp/topic-1.png",
+                        local_path_relative="topic-1.png",
+                    )
+                ),
+            ),
+            patch("job.BufferClient") as client_class,
+        ):
+            client = client_class.return_value
+            client.list_available_channels = AsyncMock(
+                side_effect=AssertionError("cached dry-run must not query Buffer")
+            )
+
+            result = await run_weekly_job(
+                env,
+                dry_run=True,
+                post_count=1,
+                topic_store=FakeTopicStore(),
+                local_image_dir=Path("/tmp"),
+                channels_cache_path=cache_path,
+                now=datetime(2026, 8, 17, 14, tzinfo=UTC),
+            )
+
+        self.assertEqual(result["channel_count"], 1)
+        self.assertEqual(result["channels_source"], "cache")
+        self.assertEqual(result["buffer_inputs"][0]["channel"]["id"], "channel-cached")
+
+    async def test_dry_run_without_cache_uses_placeholder_channel(self) -> None:
+        cache_path = Path(tempfile.mkdtemp()) / "buffer_channels.json"
+
+        class FakeTopicStore:
+            async def pick_random_available(self, limit: int = 1) -> list[Topic]:
+                return [Topic(id=1, topic="One focused topic")]
+
+            async def mark_used(self, topic_id: int, used_at: datetime) -> None:
+                del topic_id, used_at
+
+        async def generate_draft(
+            settings: Settings,
+            topic: str,
+            due_at: datetime,
+            reference_image_keys: list[str],
+            analysis: PerformanceAnalysis | None,
+        ) -> SocialPostDraft:
+            del settings, topic, reference_image_keys, analysis
+            return SocialPostDraft(
+                description="One post",
+                keywords=["one", "two", "three"],
+                image_prompt=image_prompt(),
+                due_at=due_at,
+            )
+
+        env = {
+            "OPENAI_API_KEY": "openai-key",
+            "OPENAI_IMAGE_MODEL": "gpt-image-2",
+            "OPENAI_IMAGE_WIDTH": "1088",
+            "OPENAI_IMAGE_HEIGHT": "1360",
+            "OPENAI_IMAGE_QUALITY": "medium",
+            "BUFFER_API_KEY": "buffer-key",
+            "BUFFER_ORGANIZATION_ID": "organization-id",
+            "BUFFER_API_URL": "https://api.buffer.com",
+            "MIN_SCHEDULE_LEAD_MINUTES": "30",
+            "SCHEDULE_HORIZON_DAYS": "8",
+            "MAX_POST_CHARS": "5000",
+            "RETRY_MAX_ATTEMPTS": "3",
+            "RETRY_BACKOFF_SECONDS": "1",
+        }
+
+        with (
+            patch("job.generate_social_post", new=AsyncMock(side_effect=generate_draft)),
+            patch(
+                "job._prepare_performance_analysis",
+                new=AsyncMock(side_effect=AssertionError("perf analysis must not run")),
+            ),
+            patch(
+                "job.generate_and_save_image",
+                new=AsyncMock(
+                    return_value=GeneratedImage(
+                        key="generated_graphics/topic-1.png",
+                        url=None,
+                        model="gpt-image-2",
+                        size="1024x1536",
+                        quality="medium",
+                        local_path_absolute="/tmp/topic-1.png",
+                        local_path_relative="topic-1.png",
+                    )
+                ),
+            ),
+            patch("job.BufferClient") as client_class,
+        ):
+            client = client_class.return_value
+            client.list_available_channels = AsyncMock(
+                side_effect=AssertionError("dry-run must not query Buffer")
+            )
+
+            result = await run_weekly_job(
+                env,
+                dry_run=True,
+                post_count=1,
+                topic_store=FakeTopicStore(),
+                local_image_dir=Path("/tmp"),
+                channels_cache_path=cache_path,
+                now=datetime(2026, 8, 17, 14, tzinfo=UTC),
+                skip_performance_analysis=True,
+            )
+
+        self.assertEqual(result["channel_count"], 1)
+        self.assertEqual(result["channels_source"], "placeholder")
+        self.assertEqual(result["buffer_inputs"][0]["channel"]["id"], "local-dry-run")
+        self.assertFalse(cache_path.exists())
+
+
+class ListChannelsWithRetriesTest(IsolatedAsyncioTestCase):
+    async def test_honors_retry_after_header_over_backoff(self) -> None:
+        class FailingClient:
+            async def list_available_channels(self, organization_id: str) -> list[BufferChannel]:
+                del organization_id
+                raise BufferAPIError(
+                    "Buffer HTTP error (429)",
+                    retryable=True,
+                    status_code=429,
+                    retry_after=42.0,
+                )
+
+        with patch("job.asyncio.sleep", new=AsyncMock()) as sleep:
+            with self.assertRaises(BufferAPIError):
+                await _list_channels_with_retries(
+                    FailingClient(),
+                    "organization-id",
+                    max_attempts=2,
+                    backoff_seconds=1.0,
+                )
+
+        # Retry-After is respected but capped so a long rate-limit window
+        # never freezes the run.
+        sleep.assert_awaited_once_with(job.MAX_RETRY_DELAY_SECONDS)
+
+
+class PreselectedTopicTest(IsolatedAsyncioTestCase):
     async def test_uses_a_preselected_unused_topic_for_a_single_post(self) -> None:
         selected = "Who is a San Jose Realtor experienced with move-up buyers?"
 

@@ -47,6 +47,9 @@ function jsonInit(method: string, body: unknown): RequestInit {
 /** Strip server/exception noise so users see an actual problem, not a stack trace. */
 export function friendlyError(err: unknown): string {
   let message = err instanceof Error ? err.message : String(err)
+  if (/APITimeoutError|timed out|TimeoutError/i.test(message)) {
+    return "The AI request timed out. Give it another try."
+  }
   for (const prefix of ["BufferAPIError: ", "RuntimeError: ", "ValueError: ", "Error: "]) {
     if (message.startsWith(prefix)) {
       message = message.slice(prefix.length)

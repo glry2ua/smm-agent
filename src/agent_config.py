@@ -89,25 +89,44 @@ performance numbers in the post, or claim that a pattern caused the observed res
 Draft one useful social media post suitable for reuse across all connected social channels.
 Return a concise description and 3-8 relevant search or social keywords.
 Also return a structured image_prompt for a single GPT Image 2 visual that supports the same idea.
-Choose up to 3 relevant reference_image_keys from the typed R2 inventory below. Use the explicit
-role as authoritative metadata, and use only exact keys from the inventory.
-Prefer a small, coherent set of complementary references over loosely related images. Multiple
-references are encouraged when each has a distinct job: for example, role=headshot supplies the
-Realtor's identity while role=indoor or role=outdoor supplies the setting, and role=logo supplies
-the exact brand mark. Use role=headshot-group when the Realtor-with-clients relationship is the
-subject. Do not select a headshot and headshot-group together. If no asset is relevant, return an
-empty list.
-Set image_prompt.reference_policy to indoor-flexible for indoor or typographic treatments. Set it to
-outdoor-exact for an outdoor/property-only concept, headshot-exact when the Realtor is the subject,
-and group-exact when the Realtor and clients are the subject. A headshot-exact or group-exact concept
-set outdoors must also select a role=outdoor setting reference.
+
+PHOTO-FIRST REFERENCE SELECTION
+The brand's signature format is photography-led: a real referenced property, neighborhood, or person
+dominates the frame, with short overlay copy and a small brand lockup. Text-only cards are the
+exception, not the default.
+- Whenever a photo reference in the inventory genuinely fits the topic, select it and build the
+  concept around it. Do not fall back to a typography-only card when a usable photo exists.
+- Choose up to 3 relevant reference_image_keys from the typed R2 inventory below. Use the explicit
+  role as authoritative metadata, and use only exact keys from the inventory.
+- Prefer a small, coherent set of complementary references over loosely related images. Multiple
+  references are encouraged when each has a distinct job: for example, role=headshot supplies the
+  Realtor's identity while role=indoor or role=outdoor supplies the setting, and role=logo supplies
+  the exact brand mark. Use role=headshot-group when the Realtor-with-clients relationship is the
+  subject. Do not select a headshot and headshot-group together. Return an empty list only when no
+  asset is relevant.
+- Set image_prompt.reference_policy to indoor-flexible for indoor or typographic treatments. Set it to
+  outdoor-exact for an outdoor/property-only concept, headshot-exact when the Realtor is the subject,
+  and group-exact when the Realtor and clients are the subject. A headshot-exact or group-exact concept
+  set outdoors must also select a role=outdoor setting reference.
+- Use visual_type=typographic-educational only when no indoor, outdoor, headshot, or headshot-group
+  reference genuinely fits the topic.
+
+IMAGE COPY BUDGET
+- Headline: at most 7 words expressing one idea.
+- supporting_text: at most 12 words, or omit it.
+- must_include lists visual elements only (photo zone, scrim, footer band, icon style) — never extra
+  sentences, list items, numbered rows, or statistics.
+- Keep total on-image copy at or below 30 words excluding verified business footer details.
+In composition, name the photo hero (which selected reference fills the frame), the quiet overlay
+zone for text, and the footer brand lockup placement.
 
 Available R2 reference images:
 {{available_images}}
 
 The image should follow the established premium San Jose real-estate editorial direction: warm
 ivory, charcoal, muted bronze and restrained navy; elegant serif plus clean sans-serif typography;
-generous negative space; polished property or neighborhood photography; and a minimal layout.
+generous negative space; polished property or neighborhood photography as the dominant visual; and a
+minimal layout, usually with a small logo lockup in a muted bronze footer band.
 Use only short, evergreen on-image copy. Never put unverified numbers, market statistics, prices,
 testimonials, awards, contact details, or claims in the image. Verified R2 contact fields may be
 used verbatim. Do not request a recognizable person or logo unless the matching typed identity
@@ -172,9 +191,22 @@ ART DIRECTION
 - Premium editorial design inspired by an established local luxury-property advisor.
 - Warm ivory, charcoal, muted bronze, and restrained navy palette.
 - Generous negative space and a precise grid.
-- Refined high-contrast serif headline paired with a clean sans-serif.
-- Photorealistic architecture or neighborhood imagery with natural California light.
+- Photography is the hero: when references are supplied they are the visual. Scale them full-bleed
+  or as the dominant panel of at least 55% of the frame; never shrink them to a thumbnail behind a
+  wall of text.
+- Refined high-contrast serif headline paired with a clean sans-serif; never more than two typefaces.
 - Sophisticated and approachable, never flashy, generic, or stock-template-like.
+
+LAYOUT
+- Portrait 4:5 composition with safe margins for cross-channel cropping.
+- Place copy over a quiet area of the photography or a soft ivory or bronze scrim panel so contrast
+  stays effortless; never run text across a face or a recognizable property detail.
+- The headline is the largest text element and stays within three lines; supporting text is clearly
+  smaller; footer details are smallest.
+- Brand lockup: set the logo in a muted bronze or charcoal footer band, right-aligned, with clear
+  space around it of at least its own height. Never stretch, recolor, re-light, or redraw it.
+  Render brand name and contact details as small tracked caps beside the logo, not stacked under an
+  oversized mark.
 
 CONTENT
 - Visual type: {{visual_type}}
@@ -183,8 +215,7 @@ CONTENT
 - Setting: {{setting}}
 - Composition: {{composition}}
 - Render this exact headline once: {{headline}}
-- Render this exact supporting text at most once: {{supporting_text}}
-- Must include: {{must_include}}
+{{copy_lines}}
 
 VERIFIED BUSINESS DETAILS TO RENDER
 {{business_details}}
@@ -205,15 +236,14 @@ REFERENCE MATERIAL
   before-and-after layout, or arbitrary collage.
 
 CONSTRAINTS
-- Portrait 2:3 composition with safe margins for cross-channel cropping.
-- Do not add any text beyond the headline, supporting text, and verified business details above.
+- Render only the words provided in CONTENT and VERIFIED BUSINESS DETAILS. Do not add list items,
+  numbered rows, captions, statistics, or any other text.
 - Do not invent prices, statistics, awards, testimonials, contact details, names, or logos.
 - If the reference policy is outdoor-exact, headshot-exact, or group-exact, use each matching
   role-labeled supplied reference as the exact source for its assigned role. Do not substitute a
   generic scene, person, camera angle, or architectural arrangement.
 - {{people_constraint}}
-- Keep all text crisp, correctly spelled, and comfortably legible on a phone.
-- Avoid: {{avoid}}""",
+- Keep all text crisp, correctly spelled, and comfortably legible on a phone.""",
 )
 
 _AGENT_REGISTRY: dict[str, AgentConfig] = {

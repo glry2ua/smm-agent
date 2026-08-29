@@ -6,18 +6,21 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from brand.brand_context import CONTACT_INFO_KEY, LOGO_KEY, ContactInfo, parse_contact_info
 from buffer.client import BufferClient
 from buffer.insights import analyze_insights_snapshot, load_buffer_insights
-from images.image_pipeline import ReferenceImage, ReferenceImageStore
+from images.image_pipeline import ReferenceImage, ReferenceImageStore, _is_reference_image_key
 from job import run_weekly_job, weekly_cron_time
 from settings import Settings
 from topics.topics import Topic
@@ -107,6 +110,106 @@ class WranglerTopicStore:
         )
 
 
+def _cloudflare_token() -> str | None:
+    """Return an API token from the environment or the active wrangler login."""
+
+    token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+    if token:
+        return token
+    candidates: list[Path] = []
+    xdg_config = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg_config:
+        candidates.append(Path(xdg_config) / "wrangler" / "config" / "default.toml")
+    candidates.extend(
+        Path.home() / relative
+        for relative in (
+            Path("Library/Preferences/.wrangler/config/default.toml"),
+            Path(".wrangler/config/default.toml"),
+        )
+    )
+    for path in candidates:
+        try:
+            text = path.read_text()
+        except OSError:
+            continue
+        match = re.search(r'^oauth_token\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _object_keys_from_page(payload: dict[str, Any]) -> tuple[list[str], str | None]:
+    """Extract usable reference keys and the next cursor from an R2 list page."""
+
+    result = payload.get("result")
+    # The untyped R2 list endpoint returns a bare array under "result"; entries
+    # may be plain key strings or {"key": ...} objects depending on API version.
+    # The typed listing nests the page under "keys" or "objects".
+    if isinstance(result, list):
+        raw: list[Any] = []
+        for entry in result:
+            if isinstance(entry, str):
+                raw.append(entry)
+            elif isinstance(entry, dict) and isinstance(entry.get("key"), str):
+                raw.append(entry["key"])
+    else:
+        result = result or {}
+        raw = result.get("keys")
+        if raw is None:
+            raw = [
+                item.get("key")
+                for item in result.get("objects") or []
+                if isinstance(item, dict)
+            ]
+    keys = [
+        str(key) for key in raw if isinstance(key, str) and _is_reference_image_key(str(key))
+    ]
+    cursors = payload.get("result_info") or {}
+    if not cursors and not isinstance(result, list):
+        cursors = result.get("cursors") or {}
+    next_cursor = cursors.get("cursor") or cursors.get("next")
+    return keys, str(next_cursor) if next_cursor else None
+
+
+def _account_id_from_whoami(text: str) -> str:
+    start = text.find("{")
+    if start < 0:
+        raise RuntimeError("Wrangler whoami returned no JSON account information")
+    payload = json.loads(text[start:])
+    # Older wrangler emits {"accounts": [...]}; newer versions nest under {"whoami": {...}}.
+    accounts = payload.get("accounts")
+    if accounts is None:
+        accounts = (payload.get("whoami") or {}).get("accounts")
+    for entry in accounts or []:
+        account_id = (entry.get("account") or {}).get("id") or entry.get("id")
+        if account_id:
+            return str(account_id)
+    raise RuntimeError(
+        "No Cloudflare account found in wrangler whoami output: "
+        + json.dumps(payload)[:400]
+    )
+
+
+async def _cloudflare_account_id() -> str:
+    env_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+    if env_id:
+        return env_id
+    process = await asyncio.create_subprocess_exec(
+        "npx",
+        "--yes",
+        "wrangler@latest",
+        "whoami",
+        "--json",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        message = stderr.decode().strip() or stdout.decode().strip()
+        raise RuntimeError(f"Wrangler whoami failed: {message}")
+    return _account_id_from_whoami(stdout.decode())
+
+
 class WranglerImageAssetStore:
     """Upload generated image bytes to the production R2 bucket during local live runs."""
 
@@ -141,8 +244,40 @@ class WranglerImageAssetStore:
             raise RuntimeError(f"Wrangler R2 upload failed: {message}")
 
     async def list_reference_keys(self) -> list[str]:
-        # Wrangler has no object-list command; use --reference-key for local live runs.
-        return []
+        """List source photos through the Cloudflare API, mirroring the Worker's
+        R2 bucket listing so local runs exercise the same automatic retrieval
+        catalog as the real deployment."""
+
+        token = _cloudflare_token()
+        if token is None:
+            raise RuntimeError(
+                "Listing R2 reference images requires CLOUDFLARE_API_TOKEN or an active "
+                "`wrangler login` session"
+            )
+        account = await _cloudflare_account_id()
+        base = (
+            "https://api.cloudflare.com/client/v4/accounts/"
+            f"{quote(account, safe='')}/r2/buckets/{quote(self.bucket, safe='')}/objects"
+        )
+        keys: list[str] = []
+        cursor: str | None = None
+        while len(keys) < 500:
+            url = f"{base}?per_page=1000" + (f"&cursor={quote(cursor, safe='')}" if cursor else "")
+            payload = await asyncio.to_thread(self._fetch_json, url, token)
+            if not payload.get("success", True):
+                errors = payload.get("errors") or []
+                raise RuntimeError(f"Cloudflare R2 object listing failed: {errors}")
+            page_keys, cursor = _object_keys_from_page(payload)
+            keys.extend(page_keys[: 500 - len(keys)])
+            if cursor is None:
+                break
+        return keys
+
+    @staticmethod
+    def _fetch_json(url: str, token: str) -> dict[str, Any]:
+        request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode())
 
     async def get_reference_image(self, key: str) -> ReferenceImage:
         _validate_reference_key(key)
@@ -335,6 +470,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path("dry_run_outputs"),
         help="directory for GPT Image 2 outputs generated by dry-run",
     )
+    parser.add_argument(
+        "--skip-perf",
+        action="store_true",
+        help="skip the Buffer performance analysis queries (dry-run only)",
+    )
     args = parser.parse_args(argv)
     if args.skip_keyword_update and args.mode != "end-to-end":
         parser.error("--skip-keyword-update can only be used with end-to-end")
@@ -347,6 +487,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--force can only be used with dry-run or end-to-end")
     if args.topic and args.mode not in {"dry-run"}:
         parser.error("--topic can only be used with dry-run")
+    if args.skip_perf and args.mode not in {"dry-run", "headshot-test"}:
+        parser.error("--skip-perf can only be used with dry-run or headshot-test")
     if args.topic and args.n not in {None, 1}:
         parser.error("--topic requires a single post; use --n=1")
     if args.reference_images and args.reference_keys:
@@ -700,12 +842,16 @@ async def main() -> None:
         post_count=args.n,
         channel_service=selected_service,
         topic_store=WranglerTopicStore(),
-        asset_store=remote_assets if not dry_run else None,
+        asset_store=remote_assets,
         reference_store=reference_store,
         brand_store=remote_assets,
         local_image_dir=(args.output_dir.resolve() if dry_run else None),
+        channels_cache_path=(
+            args.output_dir.resolve() / "buffer_channels.json" if dry_run else None
+        ),
         now=weekly_cron_time(force_non_monday=args.force),
         force_non_monday=args.force,
+        skip_performance_analysis=args.skip_perf,
     )
     if args.json:
         print(json.dumps(result, indent=2))

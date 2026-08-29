@@ -134,10 +134,18 @@ query GetPosts($input: PostsInput!, $first: Int!, $after: String) {
 class BufferAPIError(RuntimeError):
     """An actionable Buffer API or GraphQL error."""
 
-    def __init__(self, message: str, *, retryable: bool = False, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ):
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,10 +342,18 @@ class BufferClient:
             raise BufferAPIError("Buffer returned an invalid GraphQL response")
 
         if response.status_code == 429 or response.status_code >= 500:
+            retry_after: float | None = None
+            raw_retry_after = response.headers.get("Retry-After")
+            if raw_retry_after:
+                try:
+                    retry_after = float(raw_retry_after)
+                except ValueError:
+                    retry_after = None
             raise BufferAPIError(
                 f"Buffer HTTP error ({response.status_code})",
                 retryable=True,
                 status_code=response.status_code,
+                retry_after=retry_after,
             )
         if response.status_code >= 400:
             raise BufferAPIError(

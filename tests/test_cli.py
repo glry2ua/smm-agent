@@ -1,3 +1,4 @@
+import json
 from contextlib import redirect_stderr
 from datetime import UTC, datetime
 from io import StringIO
@@ -9,12 +10,79 @@ from buffer.insights import analyze_insights_snapshot, load_buffer_insights
 from cli import (
     HEADSHOT_TEST_TOPIC,
     WranglerTopicStore,
+    _account_id_from_whoami,
     _kitty_icat_command,
+    _object_keys_from_page,
     format_buffer_insights_report,
     format_run_report,
     parse_args,
 )
 from settings import Settings
+
+
+class ObjectKeyListingTest(TestCase):
+    def test_account_id_parses_nested_whoami_shape(self) -> None:
+        text = json.dumps(
+            {"version": 1, "whoami": {"email": "a@b.c", "accounts": [{"account": {"id": "acct9"}}]}}
+        )
+        self.assertEqual(_account_id_from_whoami(text), "acct9")
+
+    def test_account_id_parses_flat_whoami_shape(self) -> None:
+        text = json.dumps({"accounts": [{"account": {"id": "acct7"}}]})
+        self.assertEqual(_account_id_from_whoami(text), "acct7")
+
+    def test_filters_non_reference_keys_and_returns_next_cursor(self) -> None:
+        payload = {
+            "result": {
+                "keys": [
+                    "headshots/agent.png",
+                    "info/logo.png",
+                    "generated_graphics/2026/08/19/topic-1.png",
+                    "notes.txt",
+                ],
+                "cursors": {"next": "abc123"},
+            }
+        }
+
+        keys, cursor = _object_keys_from_page(payload)
+
+        self.assertEqual(keys, ["headshots/agent.png"])
+        self.assertEqual(cursor, "abc123")
+
+    def test_supports_objects_shape_without_cursor(self) -> None:
+        payload = {"result": {"objects": [{"key": "outdoors/bungalow.jpg"}]}}
+
+        keys, cursor = _object_keys_from_page(payload)
+
+        self.assertEqual(keys, ["outdoors/bungalow.jpg"])
+        self.assertIsNone(cursor)
+
+    def test_supports_untyped_list_shape_with_result_info_cursor(self) -> None:
+        payload = {
+            "result": ["headshots/agent.png", "notes.txt"],
+            "result_info": {"cursor": "cursor9", "has_more": True},
+        }
+
+        keys, cursor = _object_keys_from_page(payload)
+
+        self.assertEqual(keys, ["headshots/agent.png"])
+        self.assertEqual(cursor, "cursor9")
+
+    def test_supports_untyped_list_of_key_objects(self) -> None:
+        payload = {
+            "result": [
+                {"key": "headshots/agent.png"},
+                {"key": "generated_graphics/2026/08/19/topic-1.png"},
+                {"other": "ignored"},
+                "outdoors/bungalow.jpg",
+            ],
+            "result_info": {"cursor": "cursor10", "has_more": True},
+        }
+
+        keys, cursor = _object_keys_from_page(payload)
+
+        self.assertEqual(keys, ["headshots/agent.png", "outdoors/bungalow.jpg"])
+        self.assertEqual(cursor, "cursor10")
 
 
 class FormatRunReportTest(TestCase):
