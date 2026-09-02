@@ -5,31 +5,30 @@ runs on Cloudflare Workers and publishes three fresh, on-brand posts to every
 connected social channel every week — no manual writing, image sourcing, or
 scheduling required.
 
-Each week the agent picks three topics, writes the post copy, generates a
-custom graphic for each, and schedules the posts as drafts in Buffer (one for
-Monday, Wednesday, and Friday). A human reviews each draft and clicks Schedule
-Post to publish it. Over time, a built-in performance analyst reads engagement
-metrics and feeds writing recommendations back into future posts so the content
-improves automatically.
+## What it does
+
+Each week, a cron trigger runs the pipeline:
+
+1. **Selects topics.** Picks unused topics from a D1 database, so nothing is
+   repeated.
+2. **Writes the posts.** An LLM agent drafts the copy and a structured image
+   prompt, choosing relevant reference photos (headshots, property shots,
+   logo) from R2.
+3. **Generates a custom graphic** for each post and uploads it to R2.
+4. **Schedules drafts in Buffer** for Monday, Wednesday, and Friday on every
+   connected channel (LinkedIn, Instagram, Facebook). A human reviews each
+   draft and clicks Schedule Post to publish it.
+5. **Learns from results.** A performance-analyst agent reads the last 30 days
+   of Buffer engagement metrics and feeds writing recommendations back into
+   future drafts.
+
+It also serves a protected web board at its origin for reviewing, editing,
+scheduling, and deleting drafts (with AI image and text edits), backed by
+Cloudflare Access.
 
 ## Architecture
 
-`smm-agent` is a Python Worker deployed on Cloudflare Workers. The stack:
-
-- **Cloudflare Workers** hosts the agent and fires a weekly cron trigger.
-- **D1** stores the topic inventory and tracks which topics have been used.
-- **R2** stores brand assets (headshots, property photos, logo) and the
-  generated graphics.
-- **OpenAI Agents SDK** powers two agents: `social-post-editor` drafts the post
-  and image prompt, and `performance-analyst` reads Buffer metrics and returns
-  writing recommendations.
-- **GPT Image 2** generates a custom graphic for each post from a structured
-  image prompt and selected reference images.
-- **Buffer** receives scheduled drafts on every connected channel (LinkedIn,
-  Instagram, Facebook).
-
-The following diagram shows how the weekly job moves data between these
-services:
+The weekly job moves data between these services:
 
 ```mermaid
 flowchart TD
@@ -40,7 +39,7 @@ flowchart TD
     Cron(["Cron trigger<br/>0 14 * * MON"]):::external --> Worker
     subgraph cf ["Cloudflare"]
         Worker["smm-agent Worker<br/>(Python)"]:::cf
-        D1[("D1<br/>smm-agent-db<br/>keywords table")]:::cf
+        D1[("D1<br/>smm-agent-db<br/>topics table")]:::cf
         R2[("R2<br/>smm-agent-assets<br/>references + generated graphics")]:::cf
         Worker -->|pick unused topic| D1
         D1 -->|topic| Worker
@@ -68,374 +67,94 @@ flowchart TD
     Channels -.->|manual review & publish| Social(["Social networks"]):::external
 ```
 
-## How it works
+## Install
 
-The weekly job runs on a cron trigger. The pipeline has four stages:
+Prerequisites:
 
-1. **Select topics.** The Worker pulls unused topics from the `keywords` table
-   in the `smm-agent-db` D1 database. Each topic is marked `used_at` after a
-   successful live run, so a topic is never reused.
-2. **Draft posts.** The `social-post-editor` agent uses the OpenAI Agents SDK to
-   produce a post description, keywords, and a structured image prompt. The
-   agent can select up to three typed reference images from R2 (headshot,
-   indoor, outdoor, logo) and must follow reference-accuracy rules: it cannot
-   invent an outdoor scene, a person, or a logo unless the matching typed
-   reference is selected.
-3. **Generate images.** Each draft's image prompt is sent to GPT Image 2. In a
-   dry-run the file is written to `dry_run_outputs/`; in a live run the image is
-   uploaded to the `smm-agent-assets` R2 bucket under
-   `assets/generated_graphics/`.
-4. **Schedule posts.** A scheduled draft is created in Buffer for each selected
-   channel. Buffer requires manual review before the post is published.
+- [uv](https://docs.astral.sh/uv/) 0.12+
+- [Node.js](https://nodejs.org/) 22
+- A Cloudflare account on the Workers Paid plan
+- A Buffer account with a connected channel and an API key
+- An OpenAI API key with access to the image model
 
-A second agent, `performance-analyst`, reads the last 30 days of Buffer
-sent-post metrics and returns writing recommendations that feed back into the
-next draft.
-
-## Repository layout
-
-```
-migrations/             D1 schema migrations
-src/                    Worker entrypoint, job orchestration, CLI, and modules
-                        (agent prompts are defined in src/agent_config.py)
-tests/                  Pytest suite
-webui/                  React + shadcn/ui frontend for the content board
-wrangler.jsonc          Cloudflare Worker configuration
-pyproject.toml          Python dependencies and tooling
-```
-
-Key modules in `src/`:
-
-- `worker.py` — Cloudflare Worker entrypoint. Handles `fetch` for health and
-  asset reads, and `scheduled` for the weekly cron.
-- `job.py` — `run_weekly_job` orchestrates the four-stage pipeline and is shared
-  by the Worker, the CLI, and the tests.
-- `social_agent.py` — wraps the OpenAI Agents SDK calls for drafting and
-  performance analysis.
-- `image_pipeline.py` — GPT Image 2 generation and R2 upload.
-- `buffer_client.py` — async GraphQL client for Buffer channel listing, post
-  creation, and metrics.
-- `webui_api.py` — board endpoint (`/api/board`) backing the WebUI; loads
-  Buffer drafts and scheduled posts.
-- `settings.py` — reads and validates environment-backed configuration.
-- `cli.py` — local CLI for dry-run, end-to-end, and Buffer inspection.
-- `webui/` — React + shadcn/ui frontend for the access-locked content board.
-
-## Prerequisites
-
-Install the following before you begin:
-
-- [uv](https://docs.astral.sh/uv/) 0.12 or later
-- [Node.js](https://nodejs.org/) 22 (required by `pywrangler`; Node 24 and later
-  removed the `--experimental-wasm-stack-switching` flag that Pyodide needs)
-- A Cloudflare account on the Workers Paid plan (the bundled dependencies
-  exceed the 3 MB free-plan Worker size limit, and the weekly cron needs more
-  than the 10 ms free-plan CPU limit)
-- A Buffer account with at least one connected channel and an API key
-- An OpenAI API key with access to GPT Image 2
-
-## Local setup
-
-1. Clone the repository.
-2. Copy `.env.example` to `.env` and fill in the secret values:
-
-   ```
-   OPENAI_API_KEY=
-   BUFFER_API_KEY=
-   BUFFER_ORGANIZATION_ID=
-   ASSET_PUBLIC_BASE_URL=
-   ```
-
-3. Install the Python dependencies:
-
-   ```bash
-   uv sync
-   ```
-
-4. Run the test suite:
-
-   ```bash
-   uv run pytest -q
-   ```
-
-## Configuration
-
-The Worker reads configuration from Cloudflare environment variables and
-secrets. Non-secret values live in `wrangler.jsonc` under `vars`; secret values
-are set with `wrangler secret put` and never appear in the repository.
-
-| Variable | Where | Purpose |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | secret | Authenticates OpenAI Agents and GPT Image 2 calls |
-| `BUFFER_API_KEY` | secret | Authenticates the Buffer GraphQL API |
-| `BUFFER_ORGANIZATION_ID` | secret | Targets the Buffer organization |
-| `ASSET_PUBLIC_BASE_URL` | secret | Public origin of the Worker, used to build image URLs for Buffer |
-| `OPENAI_IMAGE_MODEL` | `wrangler.jsonc` | GPT Image 2 model name |
-| `OPENAI_IMAGE_WIDTH` | `wrangler.jsonc` | Image width in pixels (multiple of 16) |
-| `OPENAI_IMAGE_HEIGHT` | `wrangler.jsonc` | Image height in pixels (multiple of 16) |
-| `OPENAI_IMAGE_QUALITY` | `wrangler.jsonc` | One of `low`, `medium`, `high`, `auto` |
-| `BUFFER_API_URL` | `wrangler.jsonc` | Buffer GraphQL endpoint |
-| `MIN_SCHEDULE_LEAD_MINUTES` | `wrangler.jsonc` | Minimum minutes between now and a post's due time |
-| `SCHEDULE_HORIZON_DAYS` | `wrangler.jsonc` | Maximum days between now and a post's due time |
-| `MAX_POST_CHARS` | `wrangler.jsonc` | Maximum characters in the Buffer post text |
-| `RETRY_MAX_ATTEMPTS` | `wrangler.jsonc` | Retry attempts for transient Buffer and image errors |
-| `RETRY_BACKOFF_SECONDS` | `wrangler.jsonc` | Initial exponential backoff in seconds |
-
-## R2 brand information and source images
-
-The Worker reads exact business contact values from `info/contact.json` in the
-`smm-agent-assets` R2 bucket:
-
-```json
-{
-  "business_name": "Your Business Name",
-  "phone": "(555) 555-5555",
-  "city": "Your City, ST",
-  "website": "https://your-website.example/"
-}
-```
-
-Store the logo at `info/logo.png`. Contact details and the logo are optional in
-each generated graphic; when selected, the values and logo file are used
-verbatim.
-
-Organize source photos by R2 folder: `indoors/`, `outdoors/`, `headshots/`,
-and `headshot group/`. The agent may combine complementary sources—for example,
-a headshot for the Realtor's identity, an outdoor image for the setting, and
-the logo for the brand mark. The pipeline validates each role independently
-before it sends the selected files to GPT Image 2.
-
-## Local CLI
-
-The CLI in `src/cli.py` runs the same pipeline locally against the production
-D1 and R2. It accepts a mode and optional flags.
-
-### Modes
-
-- `dry-run` — generates posts and images without calling Buffer `createPost`
-  or marking D1 keywords as used. Image files are written to
-  `dry_run_outputs/`.
-- `headshot-test` — runs one deterministic dry-run post against a preselected
-  Realtor topic with a headshot reference.
-- `end-to-end` — performs production mutations: it creates Buffer scheduled
-  drafts and marks D1 keywords as used.
-- `buffer_state` — lists the configured Buffer organization and channels.
-- `buffer_insights` — reports per-channel Buffer metrics for the last 30 days.
-
-### Flags
-
-- `--json` — print the complete machine-readable result instead of the
-  validation report.
-- `--skip-keyword-update` — submit posts without marking the selected D1
-  keywords as used (`end-to-end` only).
-- `--linkedin` — build and submit posts only for available LinkedIn channels.
-- `--instagram` — build and submit posts only for available Instagram channels.
-- `--facebook` — build and submit posts only for available Facebook channels.
-- `--n N` — generate and schedule N posts for this run (1–3; default 3).
-- `--force` — run on a non-Monday for local testing. The schedule anchors to
-  the next Monday so publish times stay inside the future scheduling window.
-- `--topic TOPIC` — select one exact unused D1 topic (`dry-run` only; implies
-  `--n=1`).
-- `--reference-image PATH` — include a local source image in the dry-run
-  reference catalog (repeatable).
-- `--reference-key R2_KEY` — include an exact remote R2 source-image key in the
-  generation catalog (repeatable).
-- `--output-dir DIR` — directory for GPT Image 2 outputs generated by a dry-run
-  (default `dry_run_outputs`).
-
-The platform flags `--linkedin`, `--instagram`, and `--facebook` are mutually
-exclusive.
-
-### Examples
-
-Run a dry-run of one post:
+Setup:
 
 ```bash
-uv run python src/cli.py dry-run --n=1
+# clone the repo, then:
+cp .env.example .env          # fill in OPENAI_API_KEY, BUFFER_API_KEY,
+                              # BUFFER_ORGANIZATION_ID, ASSET_PUBLIC_BASE_URL
+uv sync                       # install Python dependencies
+npx wrangler d1 create smm-agent-db
+npx wrangler r2 bucket create smm-agent-assets
+npx wrangler d1 list          # find your database_id
+sed -e 's/<your-database-id>/<the-id-from-d1-list>/' \
+    -e 's/<your-database-name>/smm-agent-db/' \
+    -e 's/<your-bucket-name>/smm-agent-assets/' \
+  wrangler.example.jsonc > wrangler.jsonc
+uv run pywrangler sync        # one-time: vendor Python deps for wrangler
+npm run build                 # build the web frontend + vendor deps
+npx wrangler d1 migrations apply smm-agent-db --remote
 ```
 
-Run a headshot test with a local source image:
+Local dev:
 
 ```bash
-uv run python src/cli.py headshot-test \
-  --reference-image ../media/headshot.png
+npm run dev        # Worker (localhost:8787) + Vite hot reload (localhost:5173)
+npm run web-mock   # UI-only, mock data, no backend or API keys
 ```
 
-Run an end-to-end post on Facebook without marking the keyword as used:
+Local dev runs against the real production D1 and R2 bindings and the same
+`.env` values as production — board actions mutate live Buffer posts, so treat
+it like a production console.
+
+The same pipeline runs locally via the CLI (same D1/R2, no deploy needed):
 
 ```bash
-uv run python src/cli.py end-to-end --facebook --n=1 --skip-keyword-update --force
+uv run python src/cli.py dry-run --n=1      # generate posts + images, no Buffer writes
+uv run python src/cli.py end-to-end --n=1   # full run: creates Buffer drafts
+uv run python src/cli.py buffer_state       # list configured Buffer channels
 ```
-
-List the configured Buffer channels:
-
-```bash
-uv run python src/cli.py buffer_state
-```
-
-## WebUI
-
-The Worker also serves a minimal kanban board at the root of its origin. The
-board shows two columns:
-
-- **Drafts** — Buffer posts awaiting review (`draft` status).
-- **Accepted** — posts a human scheduled for publication (`scheduled` status).
-
-The board is read-only for now; interactivity and further features come later.
-
-### Local configuration
-
-`wrangler.jsonc` is committed with `database_id` left blank so no account
-identifier is published. For local development, create
-`wrangler.local.jsonc` (gitignored) by copying `wrangler.jsonc` and filling in
-your D1 database ID:
-
-```bash
-npx wrangler d1 list                      # find your database_id
-sed 's/"database_id": ""/"database_id": "<your-database-id>"/' \
-  wrangler.jsonc > wrangler.local.jsonc
-```
-
-All `wrangler`/`pywrangler` commands below take `--config wrangler.local.jsonc`.
-
-### Building the frontend
-
-The WebUI is a React + Vite + shadcn/ui app in `webui/`. Its compiled output in
-`webui/dist` is deployed as a static asset by the Worker. Build it before
-deploying or running `wrangler dev`:
-
-```bash
-cd webui && npm install && npm run build
-```
-
-Run the full local stack (Worker + Vite hot reload) from the repo root:
-
-```bash
-uv run pywrangler sync   # one-time: vendor Python deps into python_modules/ (required by wrangler)
-./dev.sh
-```
-
-The UI is at `http://localhost:5173`; the Worker is at `http://localhost:8787`.
-`dev.sh` waits for the Worker to be ready, then starts Vite, and stops both on
-Ctrl-C. (`cd webui && npm run dev` does the same thing.) If `wrangler dev` fails
-with `ModuleNotFoundError: No module named 'workers'`, `python_modules/` is
-missing — re-run `uv run pywrangler sync`.
-
-#### Dev runs against production resources (dev = prod)
-
-Local development is deliberately configured to exercise the exact production
-environment, so what you test locally is what ships:
-
-- **Remote bindings**: the `DB` (D1) and `ASSETS` (R2) bindings are marked
-  `"remote": true` in `wrangler.jsonc`. `wrangler dev` still executes the
-  Worker code locally (fast reload), but every binding call is proxied to the
-  real deployed D1 database and R2 bucket — the same ones production uses.
-  There is no separate dev database or bucket to seed or keep in sync.
-- **Secrets**: `dev.sh` regenerates `.dev.vars` from `.env` on every start, so
-  the local Worker uses the identical `OPENAI_API_KEY`, `BUFFER_API_KEY`,
-  `BUFFER_ORGANIZATION_ID`, and `ASSET_PUBLIC_BASE_URL` values as production.
-  Keep `.env` in sync with `wrangler secret put` values.
-- **Schema**: `dev.sh` applies D1 migrations with `--remote` before starting,
-  so the database is always on the current schema (migrations are idempotent).
-
-Because of this, board actions taken while developing (accept, edit, delete,
-image replace) mutate real live posts in Buffer. Treat local dev like a
-production console. The `remote` flags are ignored by `wrangler deploy`.
-
-### Board API
-
-The dashboard reads real Buffer data and mutates it through the Worker:
-
-| Route | Method | Body | Effect |
-| --- | --- | --- | --- |
-| `/api/board` | GET | — | Channels + draft/scheduled posts for the last 30 / next 90 days |
-| `/api/posts` | PATCH | `{posts:[{id,service?,metadata?}], text}` | Edit post text (all posts in a group) |
-| `/api/posts/accept` | POST | `{posts:[…], due_at?}` | Schedule drafts (keeps their scheduled time) |
-| `/api/posts/delete` | POST | `{posts:[…]}` | Delete the posts from Buffer |
-| `/api/posts/image` | POST | `{posts:[…], image:{data}}` | Store a custom image in R2 and set it as the post asset |
-| `/api/posts/image/ai` | POST | `{posts:[…], url, instruction}` | Edit the current image with GPT Image and set the result as the post asset |
-| `/api/posts/rewrite` | POST | `{post_id, text, instruction}` | Prompt-based AI edit of the text (single fast model call) |
-
-### Access lock
-
-The board is protected with Cloudflare Access (Zero Trust). Set it up once in
-the Cloudflare dashboard:
-
-1. Open **Zero Trust → Access → Applications** and create a Self-hosted
-   application for the Worker origin (for example,
-   `smm-agent.<subdomain>.workers.dev`).
-2. Add a policy for your team or email addresses.
-
-Access enforces the lock at the edge, so both the HTML and the `/api/board`
-endpoint are only reachable by signed-in users. No Worker-side auth logic is
-needed.
 
 ## Deploy
 
-The Worker deploys with `pywrangler`, the CLI for Cloudflare Python Workers.
-`pywrangler` bundles the Python dependencies into the Worker upload.
-
-1. Create `wrangler.local.jsonc` from `wrangler.jsonc` and fill in the
-   `database_id` (find it with `npx wrangler d1 list`). See
-   **Local configuration** above.
-2. Apply the D1 migrations to the remote database:
+1. Set every value from `.env` as a production secret:
 
    ```bash
-   npx wrangler d1 migrations apply smm-agent-db --remote --config wrangler.local.jsonc
+   node -e "const o={};for(const l of require('fs').readFileSync('.env','utf8').split(/\r?\n/)){if(!l||l.startsWith('#'))continue;const i=l.indexOf('=');o[l.slice(0,i)]=l.slice(i+1)}console.log(JSON.stringify(o))" \
+     | npx wrangler secret bulk -
    ```
 
-3. Set the secrets. Each command prompts for the value:
+   (`ASSET_PUBLIC_BASE_URL` must be the deployed Worker origin, e.g.
+   `https://smm-agent.<subdomain>.workers.dev`, with no trailing path.)
+
+2. Build and deploy:
 
    ```bash
-   npx wrangler secret put OPENAI_API_KEY --config wrangler.local.jsonc
-   npx wrangler secret put BUFFER_API_KEY --config wrangler.local.jsonc
-   npx wrangler secret put BUFFER_ORGANIZATION_ID --config wrangler.local.jsonc
-   npx wrangler secret put ASSET_PUBLIC_BASE_URL --config wrangler.local.jsonc
+   npm run build
+   npx wrangler deploy
    ```
 
-   For `ASSET_PUBLIC_BASE_URL`, use the deployed Worker origin (for example,
-   `https://smm-agent.<subdomain>.workers.dev`) without a trailing path.
+The cron trigger runs every Monday at 14:00 UTC (`0 14 * * MON`). CI runs lint
+and type checks (`npm run check`) before deploying.
 
-4. Build the WebUI so its static assets are included in the deployment:
+## Configuration
 
-   ```bash
-   cd webui && npm run build
-   ```
+`.env` is the single source of truth for all Worker environment values. In
+production every value is set with `wrangler secret put <NAME>` (write-only;
+re-run the command to change it).
 
-5. Deploy the Worker:
-
-   ```bash
-   PATH="/opt/homebrew/opt/node@22/bin:$PATH" \
-     uv run pywrangler deploy --config wrangler.local.jsonc
-   ```
-
-The cron trigger runs every Monday at 14:00 UTC (`0 14 * * MON`).
-
-## Testing
-
-The test suite uses `pytest`:
-
-```bash
-uv run pytest -q
-```
-
-Lint the code with `ruff`:
-
-```bash
-uv run ruff check src tests
-```
-
-## Notes on dependency versions
-
-The Cloudflare Python runtime uses Pyodide, which constrains the versions you
-can bundle:
-
-- `pydantic` is pinned to `2.10.6`. The Pyodide package index ships a
-  compatible `pydantic-core` wheel for this version. Newer pydantic versions do
-  not yet have a PyEmscripten wheel that matches the runtime's Python 3.13
-  platform.
-- `tzdata` is an explicit dependency. The `zoneinfo` module needs the IANA
-  timezone database at import time, and Pyodide does not bundle it by default.
-- `openai_compat.py` patches the OpenAI SDK's Responses API usage models so a
-  missing `cache_write_tokens` field does not raise a pydantic `ValidationError`.
-  The live API returns `cached_tokens` but the SDK requires both fields.
+| Variable | Purpose |
+| --- | --- |
+| `OPENAI_API_KEY` | Authenticates OpenAI Agents and image generation |
+| `BUFFER_API_KEY` | Authenticates the Buffer GraphQL API |
+| `BUFFER_ORGANIZATION_ID` | Targets the Buffer organization |
+| `ASSET_PUBLIC_BASE_URL` | Public origin of the Worker, used to build image URLs for Buffer |
+| `OPENAI_IMAGE_MODEL` | Image generation model name |
+| `OPENAI_IMAGE_WIDTH` / `OPENAI_IMAGE_HEIGHT` | Image dimensions in pixels (multiples of 16) |
+| `OPENAI_IMAGE_QUALITY` | One of `low`, `medium`, `high`, `auto` |
+| `BUFFER_API_URL` | Buffer GraphQL endpoint |
+| `MIN_SCHEDULE_LEAD_MINUTES` | Minimum minutes between now and a post's due time |
+| `SCHEDULE_HORIZON_DAYS` | Maximum days between now and a post's due time |
+| `MAX_POST_CHARS` | Maximum characters in the Buffer post text |
+| `RETRY_MAX_ATTEMPTS` | Retry attempts for transient Buffer and image errors |
+| `RETRY_BACKOFF_SECONDS` | Initial exponential backoff in seconds |

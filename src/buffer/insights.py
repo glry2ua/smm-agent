@@ -6,10 +6,55 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from buffer.client import BufferChannel, BufferClient
+from buffer.client import BufferChannel, BufferClient, BufferMetric
 from content.social_agent import analyze_buffer_performance
 from schemas import PerformanceAnalysis
 from settings import Settings
+
+
+def _metric_dict(metric: BufferMetric) -> dict[str, Any]:
+    return {
+        "type": metric.type,
+        "name": metric.name,
+        "value": metric.value,
+        "unit": metric.unit,
+        "description": metric.description,
+    }
+
+
+def _channel_snapshot(
+    channel: BufferChannel,
+    summary: Any,
+    posts: list[Any],
+) -> dict[str, Any]:
+    return {
+        "id": channel.id,
+        "name": channel.name,
+        "display_name": channel.display_name,
+        "service": channel.service,
+        "metrics_updated_at": summary.metrics_updated_at,
+        "metrics": [_metric_dict(metric) for metric in summary.metrics],
+        "post_count": len(posts),
+        "posts": [
+            {
+                "id": post.id,
+                "text": post.text,
+                "channel_id": post.channel_id,
+                "status": post.status,
+                "created_at": post.created_at,
+                "updated_at": post.updated_at,
+                "due_at": post.due_at,
+                "sent_at": post.sent_at,
+                "external_link": post.external_link,
+                "via": post.via,
+                "tags": list(post.tags),
+                "assets": list(post.assets),
+                "metrics_updated_at": post.metrics_updated_at,
+                "metrics": [_metric_dict(metric) for metric in post.metrics],
+            }
+            for post in posts
+        ],
+    }
 
 
 async def load_buffer_insights(
@@ -29,30 +74,31 @@ async def load_buffer_insights(
     selected_channels = (
         channels if channels is not None else await client.list_available_channels(organization_id)
     )
-    summaries, posts_by_channel = await asyncio.gather(
-        asyncio.gather(
+
+    # Index-aligned with selected_channels: gather 1 is the aggregate summary for
+    # channel i, gather 2 is that channel's sent posts. Nested so both groups
+    # fetch concurrently.
+    async def _fetch_summaries() -> list[Any]:
+        return await asyncio.gather(
             *(
                 client.get_aggregated_post_metrics(
-                    organization_id,
-                    start=start,
-                    end=end,
-                    channel_ids=[channel.id],
+                    organization_id, start=start, end=end, channel_ids=[channel.id]
                 )
                 for channel in selected_channels
             )
-        ),
-        asyncio.gather(
+        )
+
+    async def _fetch_post_lists() -> list[list[Any]]:
+        return await asyncio.gather(
             *(
                 client.list_sent_posts(
-                    organization_id,
-                    start=start,
-                    end=end,
-                    channel_ids=[channel.id],
+                    organization_id, start=start, end=end, channel_ids=[channel.id]
                 )
                 for channel in selected_channels
             )
-        ),
-    )
+        )
+
+    summaries, post_lists = await asyncio.gather(_fetch_summaries(), _fetch_post_lists())
     return {
         "organization_id": organization_id,
         "window": {
@@ -62,54 +108,9 @@ async def load_buffer_insights(
         },
         "channel_count": len(selected_channels),
         "channels": [
-            {
-                "id": channel.id,
-                "name": channel.name,
-                "display_name": channel.display_name,
-                "service": channel.service,
-                "metrics_updated_at": summary.metrics_updated_at,
-                "metrics": [
-                    {
-                        "type": metric.type,
-                        "name": metric.name,
-                        "value": metric.value,
-                        "unit": metric.unit,
-                        "description": metric.description,
-                    }
-                    for metric in summary.metrics
-                ],
-                "post_count": len(posts),
-                "posts": [
-                    {
-                        "id": post.id,
-                        "text": post.text,
-                        "channel_id": post.channel_id,
-                        "status": post.status,
-                        "created_at": post.created_at,
-                        "updated_at": post.updated_at,
-                        "due_at": post.due_at,
-                        "sent_at": post.sent_at,
-                        "external_link": post.external_link,
-                        "via": post.via,
-                        "tags": list(post.tags),
-                        "assets": list(post.assets),
-                        "metrics_updated_at": post.metrics_updated_at,
-                        "metrics": [
-                            {
-                                "type": metric.type,
-                                "name": metric.name,
-                                "value": metric.value,
-                                "unit": metric.unit,
-                                "description": metric.description,
-                            }
-                            for metric in post.metrics
-                        ],
-                    }
-                    for post in posts
-                ],
-            }
+            _channel_snapshot(channel, summary, posts)
             for channel, summary, posts in zip(
-                selected_channels, summaries, posts_by_channel, strict=True
+                selected_channels, summaries, post_lists, strict=True
             )
         ],
     }

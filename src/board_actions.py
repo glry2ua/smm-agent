@@ -1,4 +1,4 @@
-"""Board mutation endpoints: edit, schedule, delete, image replace, AI rewrite."""
+"""Board mutation endpoints: edit, schedule, delete, image replace."""
 
 from __future__ import annotations
 
@@ -7,17 +7,14 @@ import base64
 import binascii
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from agent_config import load_agent
-from buffer.client import BufferAPIError, BufferClient, channel_post_metadata
+from buffer.client import BufferClient, channel_post_metadata
 from images.image_pipeline import ASSET_PATH_PREFIX, ImageAssetStore
-from job import PACIFIC, PUBLISH_TIME
+from job import PACIFIC, PUBLISH_DAY_OFFSETS, PUBLISH_TIME
 from settings import Settings
-
-_PUBLISH_WEEKDAYS = (0, 2, 4)  # Mon, Wed, Fri — mirrors job.PUBLISH_DAY_OFFSETS
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
@@ -27,16 +24,6 @@ KEY_EXTENSION = {
     "image/jpeg": "jpg",
     "image/webp": "webp",
 }
-
-REWRITE_SYSTEM_PROMPT = (
-    "You are the social media editor for a boutique real-estate team. Apply the editor's "
-    "instruction to the provided post copy and return the revised post text. Keep the voice "
-    "helpful and specific, avoid engagement bait and unsupported claims, never invent facts "
-    "or contact details, and keep the length close to the original unless asked otherwise. "
-    "Return only the final post text with no quotes, preamble, or commentary."
-)
-
-REWRITE_MAX_OUTPUT_TOKENS = 1500
 
 
 def _client(settings: Settings) -> BufferClient:
@@ -76,26 +63,10 @@ def _post_edit_kwargs(entry: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _post_ids(post_entries: list[dict[str, Any]]) -> list[str]:
-    return [entry["id"] for entry in post_entries]
-
-
-def _per_post_errors(results: list[BaseException], post_ids: list[str]) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": post_id,
-            "ok": False,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-        for post_id, exc in zip(post_ids, results, strict=True)
-        if isinstance(exc, BaseException)
-    ]
-
-
 def _next_publish_slot(now: datetime, *, min_lead_minutes: int) -> datetime:
     """Return the next Mon/Wed/Fri 08:30 Pacific slot at least ``min_lead`` away.
 
-    Mirrors the weekly pipeline's schedule (``job.PUBLISH_TIME`` and
+    Uses the weekly pipeline's schedule (``job.PUBLISH_TIME`` and
     ``job.PUBLISH_DAY_OFFSETS``) so late accepts land on a real publish slot
     instead of a time in the past, which Buffer rejects.
     """
@@ -103,7 +74,7 @@ def _next_publish_slot(now: datetime, *, min_lead_minutes: int) -> datetime:
     earliest = now + timedelta(minutes=max(1, min_lead_minutes))
     day = now.astimezone(PACIFIC).date()
     for _ in range(28):
-        if day.weekday() in _PUBLISH_WEEKDAYS:
+        if day.weekday() in PUBLISH_DAY_OFFSETS:
             slot = datetime.combine(day, PUBLISH_TIME, PACIFIC).astimezone(UTC)
             if slot >= earliest:
                 return slot
@@ -121,6 +92,37 @@ def _parse_due_at(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+async def _apply_to_posts(
+    posts: list[dict[str, Any]],
+    edit: Callable[[dict[str, Any]], Awaitable[Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Run one Buffer edit per post, preserving input order.
+
+    Returns the shared response prefix (``ok``) plus one result per post:
+    successes carry the response dict under ``post``, failures ``error``.
+    Raises RuntimeError with the first error only when every post failed.
+    """
+
+    outcomes = await asyncio.gather(
+        *(edit(entry) for entry in posts),
+        return_exceptions=True,
+    )
+    results = [
+        {"id": entry["id"], "ok": True, "post": dict(outcome)}
+        if not isinstance(outcome, BaseException)
+        else {
+            "id": entry["id"],
+            "ok": False,
+            "error": f"{type(outcome).__name__}: {outcome}",
+        }
+        for entry, outcome in zip(posts, outcomes, strict=True)
+    ]
+    errors = [result for result in results if not result["ok"]]
+    if len(errors) == len(posts):
+        raise RuntimeError(errors[0]["error"])
+    return {"ok": not errors}, results
+
+
 async def update_post_text(
     settings: Settings,
     post_entries: list[dict[str, Any]],
@@ -130,18 +132,12 @@ async def update_post_text(
 
     client = _client(settings)
     posts = _clean_posts(post_entries)
-    ids = _post_ids(posts)
-    outcomes = await asyncio.gather(
-        *(
-            client.edit_post(entry["id"], text=text.strip(), **_post_edit_kwargs(entry))
-            for entry in posts
-        ),
-        return_exceptions=True,
-    )
-    errors = _per_post_errors(outcomes, ids)
-    if len(errors) == len(ids):
-        raise RuntimeError(errors[0]["error"])
-    return {"ok": not errors, "results": _ok_results(outcomes, ids) + errors}
+
+    async def edit(entry: dict[str, Any]) -> Any:
+        return await client.edit_post(entry["id"], text=text.strip(), **_post_edit_kwargs(entry))
+
+    info, results = await _apply_to_posts(posts, edit)
+    return {**info, "results": results}
 
 
 async def schedule_posts(
@@ -161,7 +157,6 @@ async def schedule_posts(
 
     client = _client(settings)
     posts = _clean_posts(post_entries)
-    ids = _post_ids(posts)
     current = now or datetime.now(UTC)
     requested = _parse_due_at(due_at)
     min_lead_minutes = (
@@ -172,31 +167,26 @@ async def schedule_posts(
         effective_due_at: datetime = requested
     else:
         effective_due_at = _next_publish_slot(current, min_lead_minutes=min_lead_minutes)
-    outcomes = await asyncio.gather(
-        *(
-            client.edit_post(
-                entry["id"],
-                due_at=effective_due_at,
-                mode="customScheduled",
-                scheduling_type="automatic",
-                save_to_draft=False,
-                text=text.strip() if text is not None and text.strip() else None,
-                **_post_edit_kwargs(entry),
-            )
-            for entry in posts
-        ),
-        return_exceptions=True,
-    )
-    errors = _per_post_errors(outcomes, ids)
-    if len(errors) == len(ids):
-        raise RuntimeError(errors[0]["error"])
+
+    async def edit(entry: dict[str, Any]) -> Any:
+        return await client.edit_post(
+            entry["id"],
+            due_at=effective_due_at,
+            mode="customScheduled",
+            scheduling_type="automatic",
+            save_to_draft=False,
+            text=text.strip() if text is not None and text.strip() else None,
+            **_post_edit_kwargs(entry),
+        )
+
+    info, results = await _apply_to_posts(posts, edit)
     return {
-        "ok": not errors,
+        **info,
         "scheduled_at": effective_due_at.astimezone(UTC)
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z"),
         "rescheduled": requested is None or requested < earliest,
-        "results": _ok_results(outcomes, ids) + errors,
+        "results": results,
     }
 
 
@@ -205,22 +195,14 @@ async def delete_posts(settings: Settings, post_entries: list[dict[str, Any]]) -
 
     client = _client(settings)
     posts = _clean_posts(post_entries)
-    ids = _post_ids(posts)
-    outcomes = await asyncio.gather(
-        *(client.delete_post(post_id) for post_id in ids),
-        return_exceptions=True,
-    )
-    errors = _per_post_errors(outcomes, ids)
-    if len(errors) == len(ids):
-        raise RuntimeError(errors[0]["error"])
-    return {
-        "ok": not errors,
-        "results": [
-            {"id": post_id, "ok": not isinstance(result, BaseException)}
-            for post_id, result in zip(ids, outcomes, strict=True)
-        ]
-        + errors,
-    }
+
+    async def edit(entry: dict[str, Any]) -> Any:
+        return await client.delete_post(entry["id"])
+
+    info, results = await _apply_to_posts(posts, edit)
+    for result in results:
+        result.pop("post", None)
+    return {**info, "results": results}
 
 
 def decode_image_upload(payload: Mapping[str, Any]) -> tuple[bytes, str]:
@@ -266,23 +248,13 @@ async def _set_post_image(
     image_url = f"{base_url}{ASSET_PATH_PREFIX}{key}"
     client = _client(settings)
     posts = _clean_posts(post_entries)
-    ids = _post_ids(posts)
     assets = [{"image": {"url": image_url}}]
-    outcomes = await asyncio.gather(
-        *(
-            client.edit_post(entry["id"], assets=assets, **_post_edit_kwargs(entry))
-            for entry in posts
-        ),
-        return_exceptions=True,
-    )
-    errors = _per_post_errors(outcomes, ids)
-    if len(errors) == len(ids):
-        raise RuntimeError(errors[0]["error"])
-    return {
-        "ok": not errors,
-        "image_url": image_url,
-        "results": _ok_results(outcomes, ids) + errors,
-    }
+
+    async def edit(entry: dict[str, Any]) -> Any:
+        return await client.edit_post(entry["id"], assets=assets, **_post_edit_kwargs(entry))
+
+    info, results = await _apply_to_posts(posts, edit)
+    return {**info, "image_url": image_url, "results": results}
 
 
 async def replace_post_image(
@@ -295,119 +267,3 @@ async def replace_post_image(
 
     body, mime = decode_image_upload(payload)
     return await _set_post_image(settings, store, post_entries, body, mime)
-
-
-async def _fetch_image_bytes(url: str) -> tuple[bytes, str]:
-    """Download the current post image; returns (bytes, mime type)."""
-
-    import httpx
-
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as http:
-        response = await http.get(url)
-        response.raise_for_status()
-    body = response.content
-    if not body:
-        raise ValueError("The current image could not be downloaded")
-    if len(body) > MAX_UPLOAD_BYTES:
-        raise ValueError("The current image is too large to edit (limit is 10 MB)")
-    mime = response.headers.get("content-type", "").split(";")[0].strip().lower()
-    if mime not in ALLOWED_IMAGE_MIME_TYPES:
-        mime = "image/png"
-    return body, mime
-
-
-async def ai_edit_post_image(
-    settings: Settings,
-    store: ImageAssetStore,
-    post_entries: list[dict[str, Any]],
-    payload: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Edit the post's current image with GPT Image and set the result as the asset."""
-
-    if not settings.openai_api_key.strip():
-        raise RuntimeError("OPENAI_API_KEY is required for AI image edits")
-    instruction = str(payload.get("instruction") or "").strip()
-    if not instruction:
-        raise ValueError("An edit instruction is required")
-    url = str(payload.get("url") or "").strip()
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("The post's current image URL is missing or invalid")
-
-    from openai import AsyncOpenAI
-
-    body, mime = await _fetch_image_bytes(url)
-    image_client = AsyncOpenAI(api_key=settings.openai_api_key)
-    edited = await image_client.images.edit(
-        model=settings.openai_image_model,
-        image=[(f"current.{KEY_EXTENSION[mime]}", body, mime)],
-        prompt=instruction,
-        size=settings.openai_image_size,
-        quality=settings.openai_image_quality,
-        output_format="png",
-        background="opaque",
-    )
-    if not edited.data or not edited.data[0].b64_json:
-        raise RuntimeError("GPT Image did not return edited image data")
-    new_body = base64.b64decode(edited.data[0].b64_json, validate=True)
-    return await _set_post_image(settings, store, post_entries, new_body, "image/png")
-
-
-async def rewrite_post_text(
-    settings: Settings,
-    current_text: str,
-    instruction: str,
-    *,
-    openai_client: Any = None,
-) -> str:
-    """Return an LLM-revised post text; a single fast model call, no agent loop."""
-
-    if not settings.openai_api_key.strip():
-        raise RuntimeError("OPENAI_API_KEY is required for AI text edits")
-    if not instruction.strip():
-        raise ValueError("An edit instruction is required")
-    if not current_text.strip():
-        raise ValueError("The post being edited has no text to revise")
-
-    client = openai_client
-    if client is None:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-    model = load_agent("social-post-editor").model
-
-    response = await asyncio.wait_for(
-        client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"<INSTRUCTION>\n{instruction.strip()}\n</INSTRUCTION>\n\n"
-                        f"<POST_TEXT>\n{current_text.strip()}\n</POST_TEXT>"
-                    ),
-                },
-            ],
-            max_output_tokens=REWRITE_MAX_OUTPUT_TOKENS,
-            reasoning={"effort": "low"},
-        ),
-        timeout=60.0,
-    )
-    text = getattr(response, "output_text", None)
-    if not isinstance(text, str) or not text.strip():
-        raise RuntimeError("The model returned an empty edit")
-    return text.strip()
-
-
-def _ok_results(outcomes: list[Any], post_ids: list[str]) -> list[dict[str, Any]]:
-    return [
-        {"id": post_id, "ok": True, "post": dict(result)}
-        for post_id, result in zip(post_ids, outcomes, strict=True)
-        if not isinstance(result, BaseException)
-    ]
-
-
-def describe_error(exc: BaseException) -> str:
-    if isinstance(exc, BufferAPIError):
-        return str(exc)
-    return f"{type(exc).__name__}: {exc}"

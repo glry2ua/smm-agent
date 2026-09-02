@@ -5,10 +5,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from brand.brand_context import (
     CONTACT_INFO_KEY,
@@ -23,6 +23,16 @@ from settings import Settings
 
 ASSET_PATH_PREFIX = "/assets/"
 GENERATED_GRAPHICS_PATH_PREFIX = f"{ASSET_PATH_PREFIX}generated_graphics/"
+# Bound reference-key listings so a pathological bucket cannot spin the Worker.
+MAX_REFERENCE_KEYS = 500
+
+
+class R2Bucket(Protocol):
+    async def put(self, key: str, body: bytes, **options: Any) -> Any: ...
+
+    async def get(self, key: str) -> Any: ...
+
+    async def list(self, *, limit: int, cursor: str | None = None) -> Any: ...
 
 
 class ImageAssetStore(Protocol):
@@ -56,7 +66,7 @@ class GeneratedImage:
 
 
 class R2ImageAssetStore:
-    def __init__(self, bucket: object) -> None:
+    def __init__(self, bucket: R2Bucket) -> None:
         self.bucket = bucket
 
     @classmethod
@@ -81,8 +91,8 @@ class R2ImageAssetStore:
 
         keys: list[str] = []
         cursor: str | None = None
-        while len(keys) < 500:
-            limit = min(1000, 500 - len(keys))
+        while len(keys) < MAX_REFERENCE_KEYS:
+            limit = min(1000, MAX_REFERENCE_KEYS - len(keys))
             page = (
                 await self.bucket.list(limit=limit, cursor=cursor)
                 if cursor
@@ -90,7 +100,7 @@ class R2ImageAssetStore:
             )
             for item in getattr(page, "objects", []):
                 key = str(getattr(item, "key", ""))
-                if _is_reference_image_key(key):
+                if is_reference_image_key(key):
                     keys.append(key)
             if not getattr(page, "truncated", False):
                 break
@@ -100,7 +110,7 @@ class R2ImageAssetStore:
         return keys
 
     async def get_reference_image(self, key: str) -> ReferenceImage:
-        if not _is_reference_image_key(key):
+        if not is_reference_image_key(key):
             raise ValueError(f"Invalid R2 reference image key: {key}")
         asset = await self.bucket.get(key)
         if asset is None:
@@ -133,7 +143,7 @@ class R2ImageAssetStore:
         )
 
 
-async def _r2_body(asset: object) -> bytes:
+async def _r2_body(asset: Any) -> bytes:
     array_buffer = await asset.arrayBuffer()
     try:
         from js import Uint8Array
@@ -142,7 +152,7 @@ async def _r2_body(asset: object) -> bytes:
     return Uint8Array.new(array_buffer).to_py().tobytes()
 
 
-def _is_reference_image_key(key: str) -> bool:
+def is_reference_image_key(key: str) -> bool:
     normalized = key.casefold()
     return (
         bool(key)
@@ -166,22 +176,45 @@ def image_key(topic_id: int, due_at: datetime, prompt: str) -> str:
     return f"generated_graphics/{due_at:%Y/%m/%d}/topic-{topic_id}-{digest}.png"
 
 
+def _prepare_generation(
+    image_prompt: ImagePrompt,
+    reference_images: list[ReferenceImage] | None,
+    contact_info: ContactInfo | None,
+    topic_id: int,
+    due_at: datetime,
+) -> tuple[str, str]:
+    """Render the prompt once and derive its content-addressed storage key."""
+
+    prompt = image_prompt.render(cast("list[object] | None", reference_images), contact_info)
+    return prompt, image_key(topic_id, due_at, prompt)
+
+
+def _base_generated_image(settings: Settings, key: str) -> GeneratedImage:
+    return GeneratedImage(
+        key=key,
+        url=None,
+        model=settings.openai_image_model,
+        size=settings.openai_image_size,
+        quality=settings.openai_image_quality,
+    )
+
+
 async def generate_image_bytes(
     settings: Settings,
-    image_prompt: ImagePrompt,
+    prompt: str,
     reference_images: list[ReferenceImage] | None = None,
-    contact_info: ContactInfo | None = None,
 ) -> bytes:
-    """Generate one PNG and return its decoded bytes."""
+    """Generate one PNG from an already-rendered prompt and return its decoded bytes."""
 
     from openai import AsyncOpenAI
 
     if not settings.openai_image_model:
         raise RuntimeError("Image generation requires a non-empty OPENAI_IMAGE_MODEL")
     client = AsyncOpenAI(api_key=settings.openai_api_key)
-    common = {
+    # Explicit kwargs: **dict[str, Any] defeats the SDK's typed overloads.
+    params: dict[str, Any] = {
         "model": settings.openai_image_model,
-        "prompt": image_prompt.render(reference_images, contact_info),
+        "prompt": prompt,
         "size": settings.openai_image_size,
         "quality": settings.openai_image_quality,
         "output_format": "png",
@@ -196,9 +229,9 @@ async def generate_image_bytes(
             )
             for index, image in enumerate(reference_images, start=1)
         ]
-        response = await client.images.edit(image=files, **common)
+        response = await client.images.edit(image=files, **params)  # type: ignore[arg-type]
     else:
-        response = await client.images.generate(**common)
+        response = await client.images.generate(**params)  # type: ignore[arg-type]
     if not response.data or not response.data[0].b64_json:
         raise RuntimeError("GPT Image 2 did not return image data")
     return base64.b64decode(response.data[0].b64_json, validate=True)
@@ -214,18 +247,14 @@ async def generate_and_store_image(
     contact_info: ContactInfo | None = None,
 ) -> GeneratedImage:
     settings.validate_for_images()
-    prompt = image_prompt.render(reference_images, contact_info)
-    body = await generate_image_bytes(
-        settings, image_prompt, reference_images, contact_info=contact_info
+    prompt, key = _prepare_generation(
+        image_prompt, reference_images, contact_info, topic_id, due_at
     )
-    key = image_key(topic_id, due_at, prompt)
+    body = await generate_image_bytes(settings, prompt, reference_images)
     await store.put(key, body, "image/png")
-    return GeneratedImage(
-        key=key,
+    return replace(
+        _base_generated_image(settings, key),
         url=f"{settings.asset_public_base_url}{ASSET_PATH_PREFIX}{key}",
-        model=settings.openai_image_model,
-        size=settings.openai_image_size,
-        quality=settings.openai_image_quality,
     )
 
 
@@ -241,22 +270,15 @@ async def generate_and_save_image(
 ) -> GeneratedImage:
     """Generate one PNG and save it to a local dry-run output directory."""
 
-    prompt = image_prompt.render(reference_images, contact_info)
-    key = image_key(topic_id, due_at, prompt)
+    prompt, key = _prepare_generation(
+        image_prompt, reference_images, contact_info, topic_id, due_at
+    )
     relative_key = key.removeprefix("generated_graphics/")
     destination = (output_root / relative_key).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(
-        await generate_image_bytes(
-            settings, image_prompt, reference_images, contact_info=contact_info
-        )
-    )
-    return GeneratedImage(
-        key=key,
-        url=None,
-        model=settings.openai_image_model,
-        size=settings.openai_image_size,
-        quality=settings.openai_image_quality,
+    destination.write_bytes(await generate_image_bytes(settings, prompt, reference_images))
+    return replace(
+        _base_generated_image(settings, key),
         local_path_absolute=str(destination),
         local_path_relative=os.path.relpath(destination, start=relative_to.resolve()),
     )

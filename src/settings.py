@@ -50,6 +50,19 @@ def _missing(value: object) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+def _require(context: str, required: Mapping[str, object]) -> None:
+    missing = [name for name, value in required.items() if _missing(value)]
+    if missing:
+        raise RuntimeError(
+            f"{context} is missing required environment variable(s): " + ", ".join(missing)
+        )
+
+
+def _validate_image_quality(settings: Settings) -> None:
+    if settings.openai_image_quality not in {"low", "medium", "high", "auto"}:
+        raise RuntimeError("OPENAI_IMAGE_QUALITY must be one of: low, medium, high, auto")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     openai_api_key: str
@@ -165,14 +178,8 @@ class Settings:
         }
         if require_images:
             required["ASSET_PUBLIC_BASE_URL"] = self.asset_public_base_url
-        missing = [name for name, value in required.items() if _missing(value)]
-        if missing:
-            raise RuntimeError(
-                "Worker configuration is missing required environment variable(s): "
-                + ", ".join(missing)
-            )
-        if self.openai_image_quality not in {"low", "medium", "high", "auto"}:
-            raise RuntimeError("OPENAI_IMAGE_QUALITY must be one of: low, medium, high, auto")
+        _require("Worker configuration", required)
+        _validate_image_quality(self)
         self._validate_image_dimensions()
 
     def validate_for_images(self) -> None:
@@ -184,14 +191,8 @@ class Settings:
             "OPENAI_IMAGE_QUALITY": self.openai_image_quality,
             "ASSET_PUBLIC_BASE_URL": self.asset_public_base_url,
         }
-        missing = [name for name, value in required.items() if _missing(value)]
-        if missing:
-            raise RuntimeError(
-                "Image publishing configuration is missing required environment variable(s): "
-                + ", ".join(missing)
-            )
-        if self.openai_image_quality not in {"low", "medium", "high", "auto"}:
-            raise RuntimeError("OPENAI_IMAGE_QUALITY must be one of: low, medium, high, auto")
+        _require("Image publishing configuration", required)
+        _validate_image_quality(self)
         try:
             parsed = urlsplit(self.asset_public_base_url)
         except ValueError:
@@ -210,22 +211,10 @@ class Settings:
             "BUFFER_ORGANIZATION_ID": self.buffer_organization_id,
             "BUFFER_API_URL": self.buffer_api_url,
         }
-        missing = [name for name, value in required.items() if _missing(value)]
-        if missing:
-            raise RuntimeError(
-                "Buffer configuration is missing required environment variable(s): "
-                + ", ".join(missing)
-            )
+        _require("Buffer configuration", required)
 
     def validate_for_buffer_analysis(self) -> None:
         """Validate credentials used by the read-only Buffer + Luna analysis path."""
 
         self.validate_for_buffer()
-        required = {
-            "OPENAI_API_KEY": self.openai_api_key,
-        }
-        missing = [name for name, value in required.items() if not value.strip()]
-        if missing:
-            raise RuntimeError(
-                "Buffer analysis is missing required environment variable(s): " + ", ".join(missing)
-            )
+        _require("Buffer analysis", {"OPENAI_API_KEY": self.openai_api_key})

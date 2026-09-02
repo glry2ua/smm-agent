@@ -12,8 +12,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8,<9",
     "ruff>=0.9,<1",
+    "ty>=0.0.77",
     "workers-py>=1.7",
     "workers-runtime-sdk",
 ]
@@ -23,11 +23,21 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "RET", "RUF"]
+# The en dash appears in user-facing copy (help text, validation messages).
+allowed-confusables = ["–"]
+
+[tool.ruff.format]
+
+[tool.ty.environment]
+extra-paths = ["src"]
+
+# `js` is provided by the Workers runtime at deploy time and has no stubs on disk.
+[[tool.ty.overrides]]
+include = ["src/images/image_pipeline.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
 
 [tool.uv]
 package = false
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
