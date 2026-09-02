@@ -3,220 +3,34 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
+from buffer.models import (  # noqa: F401 -- re-exported so `from buffer.client import X` keeps working
+    BufferAPIError,
+    BufferChannel,
+    BufferMetric,
+    BufferMetricsSummary,
+    BufferPost,
+    _parse_metrics,
+    _parse_post_metadata,
+    _post_action_result,
+)
+from buffer.queries import (
+    CREATE_POST_QUERY,
+    DELETE_POST_QUERY,
+    EDIT_POST_QUERY,
+    GET_AGGREGATED_POST_METRICS_QUERY,
+    GET_CHANNELS_QUERY,
+    GET_POSTS_QUERY,
+)
 from schemas import SocialPostDraft
-
-CREATE_POST_QUERY = """
-mutation CreatePost($input: CreatePostInput!) {
-  createPost(input: $input) {
-    ... on PostActionSuccess {
-      post {
-        id
-        text
-        dueAt
-        assets { id mimeType }
-      }
-    }
-    ... on MutationError {
-      message
-    }
-  }
-}
-"""
-
-EDIT_POST_QUERY = """
-mutation EditPost($input: EditPostInput!) {
-  editPost(input: $input) {
-    ... on PostActionSuccess {
-      post {
-        id
-        text
-        dueAt
-        status
-        assets { id type mimeType source thumbnail }
-      }
-    }
-    ... on MutationError {
-      message
-    }
-  }
-}
-"""
-
-DELETE_POST_QUERY = """
-mutation DeletePost($input: DeletePostInput!) {
-  deletePost(input: $input) {
-    ... on DeletePostSuccess {
-      id
-    }
-    ... on VoidMutationError {
-      message
-    }
-  }
-}
-"""
-
-GET_CHANNELS_QUERY = """
-query GetChannels($organizationId: OrganizationId!) {
-  channels(input: {
-    organizationId: $organizationId,
-    filter: { isLocked: false }
-  }) {
-    id
-    name
-    displayName
-    service
-  }
-}
-"""
-
-GET_AGGREGATED_POST_METRICS_QUERY = """
-query GetAggregatedPostMetrics($input: AggregatedPostMetricsInput!) {
-  aggregatedPostMetrics(input: $input) {
-    metrics {
-      type
-      name
-      value
-      unit
-      description
-    }
-    metricsUpdatedAt
-  }
-}
-"""
-
-GET_POSTS_QUERY = """
-query GetPosts($input: PostsInput!, $first: Int!, $after: String) {
-  posts(input: $input, first: $first, after: $after) {
-    edges {
-      node {
-        id
-        text
-        channelId
-        status
-        createdAt
-        updatedAt
-        dueAt
-        sentAt
-        externalLink
-        via
-        tags { id name color }
-        assets { id type mimeType source thumbnail }
-        metadata {
-          __typename
-          ... on InstagramPostMetadata { type shouldShareToFeed }
-          ... on FacebookPostMetadata { type }
-        }
-        metrics {
-          type
-          name
-          value
-          unit
-          description
-        }
-        metricsUpdatedAt
-      }
-    }
-    pageInfo {
-      endCursor
-      hasNextPage
-    }
-  }
-}
-"""
-
-
-class BufferAPIError(RuntimeError):
-    """An actionable Buffer API or GraphQL error."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        retryable: bool = False,
-        status_code: int | None = None,
-        retry_after: float | None = None,
-    ):
-        super().__init__(message)
-        self.retryable = retryable
-        self.status_code = status_code
-        self.retry_after = retry_after
-
-
-@dataclass(frozen=True, slots=True)
-class BufferChannel:
-    id: str
-    name: str
-    display_name: str
-    service: str
-
-
-@dataclass(frozen=True, slots=True)
-class BufferMetric:
-    type: str
-    name: str
-    value: float
-    unit: str
-    description: str
-
-
-@dataclass(frozen=True, slots=True)
-class BufferMetricsSummary:
-    metrics: tuple[BufferMetric, ...]
-    metrics_updated_at: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class BufferPost:
-    id: str
-    text: str
-    channel_id: str
-    status: str
-    created_at: str
-    updated_at: str
-    due_at: str | None
-    sent_at: str | None
-    external_link: str | None
-    via: str
-    tags: tuple[dict[str, Any], ...]
-    assets: tuple[dict[str, Any], ...]
-    metadata: dict[str, Any] | None
-    metrics: tuple[BufferMetric, ...]
-    metrics_updated_at: str | None
 
 
 def _utc_iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _parse_metrics(raw_metrics: Any) -> tuple[BufferMetric, ...]:
-    if raw_metrics is None:
-        return ()
-    if not isinstance(raw_metrics, list):
-        raise BufferAPIError("Buffer did not return a post metrics list")
-    parsed_metrics = []
-    for metric in raw_metrics:
-        if not isinstance(metric, Mapping) or not metric.get("type"):
-            continue
-        try:
-            value = float(metric.get("value", 0))
-        except (TypeError, ValueError) as exc:
-            raise BufferAPIError("Buffer returned a non-numeric metric value") from exc
-        parsed_metrics.append(
-            BufferMetric(
-                type=str(metric["type"]),
-                name=str(metric.get("name") or metric["type"]),
-                value=value,
-                unit=str(metric.get("unit") or "count"),
-                description=str(metric.get("description") or ""),
-            )
-        )
-    return tuple(parsed_metrics)
 
 
 def channel_post_metadata(
@@ -274,33 +88,30 @@ def build_create_post_input(
     return input_payload
 
 
-def _parse_post_metadata(raw_metadata: Any) -> dict[str, Any] | None:
-    """Keep only the service keys the board needs to rebuild edit input."""
-
-    if not isinstance(raw_metadata, Mapping):
-        return None
-    key = {
-        "InstagramPostMetadata": "instagram",
-        "FacebookPostMetadata": "facebook",
-    }.get(str(raw_metadata.get("__typename") or ""))
-    if key is None:
-        return None
-    payload: dict[str, Any] = {"type": str(raw_metadata.get("type") or "")}
-    if key == "instagram":
-        payload["shouldShareToFeed"] = bool(raw_metadata.get("shouldShareToFeed", True))
-    return {key: payload}
-
-
-def _post_action_result(field: str, data: Mapping[str, Any]) -> dict[str, Any]:
-    """Unwrap a PostActionPayload union or raise with the MutationError message."""
-
-    action = data.get(field)
-    if not isinstance(action, Mapping):
-        raise BufferAPIError(f"Buffer response did not include a {field} result")
-    post_data = action.get("post")
-    if not isinstance(post_data, Mapping) or not post_data.get("id"):
-        raise BufferAPIError(str(action.get("message", "Buffer did not return a post")))
-    return dict(post_data)
+def _parse_post_node(node: Mapping[str, Any]) -> BufferPost:
+    raw_tags = node.get("tags")
+    raw_assets = node.get("assets")
+    tags = list(raw_tags) if isinstance(raw_tags, list) else []
+    assets = list(raw_assets) if isinstance(raw_assets, list) else []
+    return BufferPost(
+        id=str(node["id"]),
+        text=str(node.get("text") or ""),
+        channel_id=str(node.get("channelId") or ""),
+        status=str(node.get("status") or ""),
+        created_at=str(node.get("createdAt") or ""),
+        updated_at=str(node.get("updatedAt") or ""),
+        due_at=str(node["dueAt"]) if node.get("dueAt") else None,
+        sent_at=str(node["sentAt"]) if node.get("sentAt") else None,
+        external_link=(str(node["externalLink"]) if node.get("externalLink") else None),
+        via=str(node.get("via") or ""),
+        tags=tuple(dict(tag) for tag in tags if isinstance(tag, Mapping)),
+        assets=tuple(dict(asset) for asset in assets if isinstance(asset, Mapping)),
+        metadata=_parse_post_metadata(node.get("metadata")),
+        metrics=_parse_metrics(node.get("metrics")),
+        metrics_updated_at=(
+            str(node["metricsUpdatedAt"]) if node.get("metricsUpdatedAt") else None
+        ),
+    )
 
 
 class BufferClient:
@@ -476,35 +287,13 @@ class BufferClient:
             page_info = connection.get("pageInfo")
             if not isinstance(edges, list) or not isinstance(page_info, Mapping):
                 raise BufferAPIError("Buffer returned an invalid posts page")
-            for edge in edges:
-                node = edge.get("node") if isinstance(edge, Mapping) else None
-                if not isinstance(node, Mapping) or not node.get("id"):
-                    continue
-                tags = node.get("tags") if isinstance(node.get("tags"), list) else []
-                assets = node.get("assets") if isinstance(node.get("assets"), list) else []
-                posts.append(
-                    BufferPost(
-                        id=str(node["id"]),
-                        text=str(node.get("text") or ""),
-                        channel_id=str(node.get("channelId") or ""),
-                        status=str(node.get("status") or ""),
-                        created_at=str(node.get("createdAt") or ""),
-                        updated_at=str(node.get("updatedAt") or ""),
-                        due_at=str(node["dueAt"]) if node.get("dueAt") else None,
-                        sent_at=str(node["sentAt"]) if node.get("sentAt") else None,
-                        external_link=(
-                            str(node["externalLink"]) if node.get("externalLink") else None
-                        ),
-                        via=str(node.get("via") or ""),
-                        tags=tuple(dict(tag) for tag in tags if isinstance(tag, Mapping)),
-                        assets=tuple(dict(asset) for asset in assets if isinstance(asset, Mapping)),
-                        metadata=_parse_post_metadata(node.get("metadata")),
-                        metrics=_parse_metrics(node.get("metrics")),
-                        metrics_updated_at=(
-                            str(node["metricsUpdatedAt"]) if node.get("metricsUpdatedAt") else None
-                        ),
-                    )
-                )
+            posts.extend(
+                _parse_post_node(edge["node"])
+                for edge in edges
+                if isinstance(edge, Mapping)
+                and isinstance(edge.get("node"), Mapping)
+                and edge["node"].get("id")
+            )
             if not page_info.get("hasNextPage"):
                 break
             end_cursor = page_info.get("endCursor")
@@ -543,14 +332,7 @@ class BufferClient:
             CREATE_POST_QUERY,
             {"input": build_create_post_input(post, channel_id, service)},
         )
-
-        action = data.get("createPost")
-        if not isinstance(action, Mapping):
-            raise BufferAPIError("Buffer response did not include a createPost result")
-        post_data = action.get("post")
-        if not isinstance(post_data, Mapping) or not post_data.get("id"):
-            raise BufferAPIError(str(action.get("message", "Buffer did not return a post ID")))
-        return dict(post_data)
+        return _post_action_result("createPost", data)
 
     async def edit_post(
         self,

@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "settings": {
+    "react": {
+      "version": "19"
+    }
+  },
+  "rules": {
+    "react/react-in-jsx-scope": "off"
+  },
+  "overrides": [
+    {
+      "files": ["src/ui/*.tsx"],
+      "rules": {
+        "no-shadow": "off",
+        "react/no-children-prop": "off"
+      }
+    },
+    {
+      "files": ["src/hooks/use-board.ts"],
+      "rules": {
+        "react/hooks": "off",
+        "react/exhaustive-effect-dependencies": "off"
+      }
+    },
+    {
+      "files": [
+        "src/App.tsx",
+        "src/hooks/use-board.ts",
+        "src/hooks/use-topics.ts",
+        "src/hooks/use-post-actions.ts"
+      ],
+      "rules": {
+        "react/set-state-in-effect": "off"
+      }
+    },
+    {
+      "files": ["src/components/post-modal.tsx"],
+      "rules": {
+        "react/purity": "off"
+      }
+    }
+  ]
+}

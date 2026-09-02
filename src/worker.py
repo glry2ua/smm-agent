@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -11,10 +11,8 @@ from urllib.parse import parse_qs, urlparse
 from workers import Response, WorkerEntrypoint
 
 from board_actions import (
-    ai_edit_post_image,
     delete_posts,
     replace_post_image,
-    rewrite_post_text,
     schedule_posts,
     update_post_text,
 )
@@ -91,7 +89,7 @@ async def _json_body(request) -> dict[str, object]:
     if isinstance(body, Mapping):
         return dict(body)
     try:
-        return {str(key): body[key] for key in body.keys()}  # type: ignore[attr-defined]
+        return {str(key): body[key] for key in body}  # type: ignore[attr-defined]
     except Exception as exc:
         raise ValueError("Request body must be a JSON object") from exc
 
@@ -127,151 +125,149 @@ def _optional_due_at(body: Mapping[str, object]) -> str | None:
     return str(value).strip()
 
 
+async def _handle_health(env, settings, request, parsed, body):
+    return _json_response({"ok": True, "service": "smm-agent"})
+
+
+async def _handle_board(env, settings, request, parsed, body):
+    # `?fresh=1` = explicit user reload: skip the board TTL. Regular page
+    # views are served from the client cache or the board TTL.
+    fresh = "fresh" in parse_qs(parsed.query)
+    board = await load_board_cached(settings, fresh=fresh)
+    board["title"] = await _board_title(env)
+    return _json_response(board)
+
+
+async def _handle_topics_list(env, settings, request, parsed, body):
+    topics = await TopicStore.from_env(env).list_topics()
+    return _json_response(
+        {"topics": [asdict(t) for t in topics]}  # type: ignore[misc]
+    )
+
+
+async def _handle_topics_add(env, settings, request, parsed, body):
+    topic = body.get("topic")
+    if not isinstance(topic, str):
+        raise ValueError("body.topic must be a string")
+    added = await TopicStore.from_env(env).add_topic(topic)
+    return _json_response({"ok": True, "topic": asdict(added)})
+
+
+async def _handle_topics_reset(env, settings, request, parsed, body):
+    store = TopicStore.from_env(env)
+    ids = body.get("ids")
+    if isinstance(ids, list):
+        topic_ids = [int(i) for i in ids if str(i).strip()]
+        reset = await store.mark_unused(topic_ids)
+    else:
+        # No ids given: reset every used topic.
+        reset = await store.mark_all_unused()
+    return _json_response({"ok": True, "reset": reset})
+
+
+async def _handle_topics_delete(env, settings, request, parsed, body):
+    raw_id = body.get("id")
+    try:
+        topic_id = int(raw_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("body.id must be a topic ID") from exc
+    deleted = await TopicStore.from_env(env).delete_topic(topic_id)
+    if not deleted:
+        raise ValueError("Topic not found")
+    return _json_response({"ok": True, "deleted": True})
+
+
+async def _handle_posts_patch(env, settings, request, parsed, body):
+    text = body.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("body.text must be a non-empty string")
+    result = await update_post_text(settings, _post_entries(body), text)
+    return _json_response(result)  # type: ignore[arg-type]
+
+
+async def _handle_posts_accept(env, settings, request, parsed, body):
+    text = body.get("text")
+    result = await schedule_posts(
+        settings,
+        _post_entries(body),
+        _optional_due_at(body),
+        text if isinstance(text, str) else None,
+    )
+    return _json_response(result)  # type: ignore[arg-type]
+
+
+async def _handle_posts_delete(env, settings, request, parsed, body):
+    result = await delete_posts(settings, _post_entries(body))
+    return _json_response(result)  # type: ignore[arg-type]
+
+
+async def _handle_posts_image(env, settings, request, parsed, body):
+    image = body.get("image")
+    if not isinstance(image, Mapping):
+        raise ValueError("body.image must include image data")
+    store = R2ImageAssetStore.from_env(env)
+    result = await replace_post_image(settings, store, _post_entries(body), dict(image))
+    return _json_response(result)  # type: ignore[arg-type]
+
+
+async def _serve_generated_asset(env, path: str) -> Response:
+    key = path.removeprefix("/assets/")
+    asset = await env.ASSETS.get(key)
+    if asset is None:
+        return _json_response({"error": "asset not found"}, status=404)
+    return Response(
+        asset.body,
+        headers={
+            "Content-Type": "image/png",
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "ETag": asset.httpEtag,
+        },
+    )
+
+
+Handler = Callable[[Any, Settings, Any, Any, dict[str, object] | None], Awaitable[Response]]
+
+_ROUTES: dict[tuple[str, str], Handler] = {
+    ("GET", "/health"): _handle_health,
+    ("GET", "/api/board"): _handle_board,
+    ("GET", "/api/topics"): _handle_topics_list,
+    ("POST", "/api/topics"): _handle_topics_add,
+    ("POST", "/api/topics/reset"): _handle_topics_reset,
+    ("POST", "/api/topics/delete"): _handle_topics_delete,
+    ("PATCH", "/api/posts"): _handle_posts_patch,
+    ("POST", "/api/posts/accept"): _handle_posts_accept,
+    ("POST", "/api/posts/delete"): _handle_posts_delete,
+    ("POST", "/api/posts/image"): _handle_posts_image,
+}
+
+_MUTATES_BOARD = {
+    ("PATCH", "/api/posts"),
+    ("POST", "/api/posts/accept"),
+    ("POST", "/api/posts/delete"),
+    ("POST", "/api/posts/image"),
+}
+
+
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         parsed = urlparse(request.url)
         path = parsed.path
         settings = Settings.from_env(self.env)
+        route = (request.method, path)
 
-        if request.method == "GET" and path == "/health":
-            return _json_response({"ok": True, "service": "smm-agent"})
-        if request.method == "GET" and path == "/api/board":
-            # `?fresh=1` = explicit user reload: skip the board TTL. Regular
-            # page views are served from the client cache or the board TTL.
-            fresh = "fresh" in parse_qs(parsed.query)
-            try:
-                board = await load_board_cached(settings, fresh=fresh)
-            except Exception as exc:
-                return _error_response(exc)
-            board["title"] = await _board_title(self.env)
-            return _json_response(board)
-        if request.method == "GET" and path == "/api/topics":
-            try:
-                topics = await TopicStore.from_env(self.env).list_topics()
-            except Exception as exc:
-                return _error_response(exc)
-            return _json_response(
-                {"topics": [asdict(t) for t in topics]}  # type: ignore[misc]
-            )
-        if request.method == "POST" and path == "/api/topics":
-            try:
-                body = await _json_body(request)
-                topic = body.get("topic")
-                if not isinstance(topic, str):
-                    raise ValueError("body.topic must be a string")
-                added = await TopicStore.from_env(self.env).add_topic(topic)
-            except Exception as exc:
-                return _error_response(exc)
-            return _json_response({"ok": True, "topic": asdict(added)})
-        if request.method == "POST" and path == "/api/topics/reset":
-            try:
-                body = await _json_body(request)
-                store = TopicStore.from_env(self.env)
-                ids = body.get("ids")
-                if isinstance(ids, list):
-                    topic_ids = [int(i) for i in ids if str(i).strip()]
-                    reset = await store.mark_unused(topic_ids)
-                else:
-                    # No ids given: reset every used topic.
-                    reset = await store.mark_all_unused()
-            except Exception as exc:
-                return _error_response(exc)
-            return _json_response({"ok": True, "reset": reset})
-        if request.method == "POST" and path == "/api/topics/delete":
-            try:
-                body = await _json_body(request)
-                raw_id = body.get("id")
-                try:
-                    topic_id = int(raw_id)  # type: ignore[arg-type]
-                except (TypeError, ValueError) as exc:
-                    raise ValueError("body.id must be a topic ID") from exc
-                deleted = await TopicStore.from_env(self.env).delete_topic(topic_id)
-                if not deleted:
-                    raise ValueError("Topic not found")
-            except Exception as exc:
-                return _error_response(exc)
-            return _json_response({"ok": True, "deleted": True})
-        if path == "/api/posts" and request.method == "PATCH":
-            try:
-                body = await _json_body(request)
-                text = body.get("text")
-                if not isinstance(text, str) or not text.strip():
-                    raise ValueError("body.text must be a non-empty string")
-                result = await update_post_text(settings, _post_entries(body), text)
-            except Exception as exc:
-                return _error_response(exc)
-            invalidate_board_cache()
-            return _json_response(result)  # type: ignore[arg-type]
-        if path == "/api/posts/accept" and request.method == "POST":
-            try:
-                body = await _json_body(request)
-                text = body.get("text")
-                result = await schedule_posts(
-                    settings,
-                    _post_entries(body),
-                    _optional_due_at(body),
-                    text if isinstance(text, str) else None,
-                )
-            except Exception as exc:
-                return _error_response(exc)
-            invalidate_board_cache()
-            return _json_response(result)  # type: ignore[arg-type]
-        if path == "/api/posts/delete" and request.method == "POST":
-            try:
-                body = await _json_body(request)
-                result = await delete_posts(settings, _post_entries(body))
-            except Exception as exc:
-                return _error_response(exc)
-            invalidate_board_cache()
-            return _json_response(result)  # type: ignore[arg-type]
-        if path == "/api/posts/image" and request.method == "POST":
-            try:
-                body = await _json_body(request)
-                image = body.get("image")
-                if not isinstance(image, Mapping):
-                    raise ValueError("body.image must include image data")
-                store = R2ImageAssetStore.from_env(self.env)
-                result = await replace_post_image(settings, store, _post_entries(body), dict(image))
-            except Exception as exc:
-                return _error_response(exc)
-            invalidate_board_cache()
-            return _json_response(result)  # type: ignore[arg-type]
-        if path == "/api/posts/image/ai" and request.method == "POST":
-            try:
-                body = await _json_body(request)
-                store = R2ImageAssetStore.from_env(self.env)
-                result = await ai_edit_post_image(settings, store, _post_entries(body), body)
-            except Exception as exc:
-                return _error_response(exc)
-            invalidate_board_cache()
-            return _json_response(result)  # type: ignore[arg-type]
-        if path == "/api/posts/rewrite" and request.method == "POST":
-            try:
-                body = await _json_body(request)
-                text = body.get("text")
-                instruction = body.get("instruction")
-                if not isinstance(text, str) or not text.strip():
-                    raise ValueError("body.text must be the current post text")
-                if not isinstance(instruction, str) or not instruction.strip():
-                    raise ValueError("body.instruction must describe the requested edit")
-                new_text = await rewrite_post_text(settings, text, instruction)
-            except Exception as exc:
-                return _error_response(exc)
-            return _json_response({"ok": True, "text": new_text})
         if request.method == "GET" and path.startswith(GENERATED_GRAPHICS_PATH_PREFIX):
-            key = path.removeprefix("/assets/")
-            asset = await self.env.ASSETS.get(key)
-            if asset is None:
-                return _json_response({"error": "asset not found"}, status=404)
-            return Response(
-                asset.body,
-                headers={
-                    "Content-Type": "image/png",
-                    "Cache-Control": "public, max-age=31536000, immutable",
-                    "ETag": asset.httpEtag,
-                },
-            )
-        return _json_response({"error": "not found"}, status=404)
+            return await _serve_generated_asset(self.env, path)
+        handler = _ROUTES.get(route)
+        if handler is None:
+            return _json_response({"error": "not found"}, status=404)
+        try:
+            body = await _json_body(request) if request.method != "GET" else None
+            response = await handler(self.env, settings, request, parsed, body)
+        except Exception as exc:
+            return _error_response(exc)
+        if route in _MUTATES_BOARD:
+            invalidate_board_cache()
+        return response
 
     async def scheduled(self, controller, env, ctx):
         del controller, ctx

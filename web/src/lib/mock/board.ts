@@ -110,7 +110,7 @@ function bufferText(description: string, keywords: string[]): string {
 let nextId = 1;
 
 /** Fixed-literal ids keep the store stable; see `ids` above. */
-function post(partial: Omit<BoardPost, "id"> & { id: string }): BoardPost {
+function mkPost(partial: Omit<BoardPost, "id"> & { id: string }): BoardPost {
   return partial;
 }
 
@@ -119,7 +119,7 @@ function post(partial: Omit<BoardPost, "id"> & { id: string }): BoardPost {
 // with an image, a text-only draft, an upcoming scheduled post, an overdue
 // one, and sent posts — some with generated graphics attached.
 const INITIAL_POSTS: BoardPost[] = [
-  post({
+  mkPost({
     id: ids.posts.launchIg,
     text: bufferText(
       "Open house this Saturday in Willow Glen! Tour the remodeled 4-bed at 1423 Malone Rd from 1–4 PM, and I'll walk you through what sold on the block last month.",
@@ -134,7 +134,7 @@ const INITIAL_POSTS: BoardPost[] = [
     // Instagram posts always carry Buffer-validated metadata.
     metadata: { instagram: { type: "post", shouldShareToFeed: true } },
   }),
-  post({
+  mkPost({
     id: ids.posts.launchLi,
     text: bufferText(
       "Open house this Saturday in Willow Glen! Tour the remodeled 4-bed at 1423 Malone Rd from 1–4 PM, and I'll walk you through what sold on the block last month.",
@@ -149,7 +149,7 @@ const INITIAL_POSTS: BoardPost[] = [
     // LinkedIn needs no per-network metadata.
     metadata: null,
   }),
-  post({
+  mkPost({
     id: ids.posts.story,
     text: bufferText(
       "Just listed in Almaden Valley: a 5-bed on a cul-de-sac backing to the trails, listed at $2,395,000. DM me for the private tour link before it hits Zillow.",
@@ -175,7 +175,7 @@ const INITIAL_POSTS: BoardPost[] = [
     // unless the metadata round-trips (why PostRef carries it).
     metadata: { instagram: { type: "story", shouldShareToFeed: false } },
   }),
-  post({
+  mkPost({
     id: ids.posts.bridge,
     text: bufferText(
       "Thinking about a bridge loan so you can buy before you sell? Here's how three of this year's San Jose buyers pulled it off without carrying two mortgages.",
@@ -189,7 +189,7 @@ const INITIAL_POSTS: BoardPost[] = [
     assets: [],
     metadata: { facebook: { type: "post" } },
   }),
-  post({
+  mkPost({
     id: ids.posts.walkthrough,
     text: bufferText(
       "Join me Thursday evening for a live walkthrough of the San Jose market — inventory, days on market, and what the Fed's latest move means for buyers.",
@@ -203,7 +203,7 @@ const INITIAL_POSTS: BoardPost[] = [
     assets: [],
     metadata: null,
   }),
-  post({
+  mkPost({
     id: ids.posts.overdue,
     text: bufferText(
       "August's San Jose market in one chart: inventory up 12%, days-on-market down to 11, and rates finally stabilizing. Full breakdown in the comments.",
@@ -217,7 +217,7 @@ const INITIAL_POSTS: BoardPost[] = [
     assets: [],
     metadata: { instagram: { type: "post", shouldShareToFeed: true } },
   }),
-  post({
+  mkPost({
     id: ids.posts.recapIg,
     text: bufferText(
       "Recap: three offers in six days on the Blossom Valley remodel, and what the buyers who lost out should watch for next month.",
@@ -237,7 +237,7 @@ const INITIAL_POSTS: BoardPost[] = [
     assets: [],
     metadata: { instagram: { type: "post", shouldShareToFeed: true } },
   }),
-  post({
+  mkPost({
     id: ids.posts.recapFb,
     text: bufferText(
       "Recap: three offers in six days on the Blossom Valley remodel, and what the buyers who lost out should watch for next month.",
@@ -256,7 +256,7 @@ const INITIAL_POSTS: BoardPost[] = [
     assets: [],
     metadata: { facebook: { type: "post" } },
   }),
-  post({
+  mkPost({
     id: ids.posts.staging,
     text: bufferText(
       "Behind the scenes from yesterday's shoot — staging this Blossom Valley living room took the listing photos from dated to flagship.",

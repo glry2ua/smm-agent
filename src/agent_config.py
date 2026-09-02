@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
-_THINKING_LEVELS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
+ThinkingLevel = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
 
 class AgentConfigError(ValueError):
@@ -33,7 +34,7 @@ class AgentConfig:
     name: str
     description: str
     model: str
-    thinking: str | None
+    thinking: ThinkingLevel | None
     verbosity: str | None
     instructions: str
 
@@ -276,8 +277,7 @@ def render_agent(name: str, values: dict[str, object]) -> str:
             raise AgentConfigError(f"Agent {name!r} requires missing template value {key!r}")
         return str(values[key])
 
-    rendered = _PLACEHOLDER.sub(replace, config.instructions)
-    return rendered
+    return _PLACEHOLDER.sub(replace, config.instructions)
 
 
 __all__ = [

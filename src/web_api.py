@@ -72,7 +72,7 @@ def _origin_relative(url: str, base_url: str) -> str:
     Worker itself in production, the local worker via the Vite proxy in dev.
     """
     if base_url and url.startswith(f"{base_url}/"):
-        return url[len(base_url):]
+        return url[len(base_url) :]
     return url
 
 
@@ -83,9 +83,7 @@ def _card(post: Any, channel_id: str, asset_base_url: str) -> dict[str, Any]:
             "type": str(asset.get("type") or ""),
             "mime_type": str(asset.get("mimeType") or ""),
             "source": _origin_relative(str(asset.get("source") or ""), asset_base_url),
-            "thumbnail": _origin_relative(
-                str(asset.get("thumbnail") or ""), asset_base_url
-            ),
+            "thumbnail": _origin_relative(str(asset.get("thumbnail") or ""), asset_base_url),
         }
         for asset in post.assets
     ]
@@ -122,9 +120,7 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
     if hit is not None and now_mono - hit[0] < CHANNELS_TTL_SECONDS:
         channels = hit[1]
     else:
-        channels = await client.list_available_channels(
-            settings.buffer_organization_id
-        )
+        channels = await client.list_available_channels(settings.buffer_organization_id)
         _CACHE[channels_key] = (now_mono, channels)
     channel_ids = [channel.id for channel in channels]
     if not channel_ids:
@@ -169,16 +165,9 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
             }
             for channel in channels
         ],
-        "drafts": [
-            _card(post, post.channel_id, settings.asset_public_base_url)
-            for post in drafts
-        ],
+        "drafts": [_card(post, post.channel_id, settings.asset_public_base_url) for post in drafts],
         "accepted": [
-            _card(post, post.channel_id, settings.asset_public_base_url)
-            for post in accepted
+            _card(post, post.channel_id, settings.asset_public_base_url) for post in accepted
         ],
-        "posted": [
-            _card(post, post.channel_id, settings.asset_public_base_url)
-            for post in sent
-        ],
+        "posted": [_card(post, post.channel_id, settings.asset_public_base_url) for post in sent],
     }

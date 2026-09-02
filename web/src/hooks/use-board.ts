@@ -4,7 +4,7 @@ import { MOCK } from "@/lib/api"
 import { fetchMockBoard } from "@/lib/mock/board"
 import type { Board } from "@/types"
 
-export interface BoardState {
+interface BoardState {
   board: Board | null
   error: string | null
   /** First fetch and nothing on screen yet: show skeletons. */
@@ -18,7 +18,7 @@ export interface BoardState {
 // StrictMode double-mounts, so re-rendering the page never re-hits
 // /api/board. Buffer's quota (250 calls/24h) makes every call count.
 let cache: { board: Board } | null = null
-let inFlight: Promise<void> | null = null
+let inFlight: Promise<Board> | null = null
 
 export function useBoard(): BoardState {
   // MOCK is a build-time constant (vite --mode mock); the branch never flips
@@ -78,46 +78,56 @@ function useRealBoard(): BoardState {
     let cancelled = false
     setRefreshing(true)
 
-    const load = async () => {
+    // Returns the board instead of setting state: state writes live in the
+    // effect below so each run reacts with its own `cancelled` flag, even when
+    // it reuses a promise started by a run whose cleanup already fired.
+    const load = async (): Promise<Board> => {
       // `fresh=1` bypasses the server's board TTL for explicit user reloads.
       const url = reloadToken > 0 ? "/api/board?fresh=1" : "/api/board"
-      try {
-        const response = await fetch(url)
-        if (!response.ok) {
-          // Prefer the server's error message over a bare status code.
-          let message = `Board request failed with status ${response.status}`
-          try {
-            const body = (await response.json()) as { error?: unknown }
-            if (body && typeof body.error === "string" && body.error.trim()) {
-              message = body.error
-            }
-          } catch {
-            // non-JSON error body: keep the status-code message
+      const response = await fetch(url)
+      if (!response.ok) {
+        // Prefer the server's error message over a bare status code.
+        let message = `Board request failed with status ${response.status}`
+        try {
+          const body = (await response.json()) as { error?: unknown }
+          if (body && typeof body.error === "string" && body.error.trim()) {
+            message = body.error
           }
-          throw new Error(message)
+        } catch {
+          // non-JSON error body: keep the status-code message
         }
-        const data = (await response.json()) as Board
-        cache = { board: data }
-        if (!cancelled) {
-          setBoard(data)
-          setError(null)
-        }
-      } catch (err: unknown) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load board")
-        }
-      } finally {
-        if (!cancelled) {
-          setRefreshing(false)
-          setLoading(false)
-        }
+        throw new Error(message)
       }
+      const data = (await response.json()) as Board
+      cache = { board: data }
+      return data
     }
 
     // Dedupe concurrent loads (e.g. StrictMode's double effect run) into one
     // request; both mounts get the same result.
-    inFlight = inFlight ?? load().finally(() => {
-      inFlight = null
+    const promise =
+      inFlight ??
+      (inFlight = load().finally(() => {
+        inFlight = null
+      }))
+
+    promise.then(
+      (data) => {
+        if (!cancelled) {
+          setBoard(data)
+          setError(null)
+        }
+      },
+      (err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load board")
+        }
+      },
+    ).finally(() => {
+      if (!cancelled) {
+        setRefreshing(false)
+        setLoading(false)
+      }
     })
 
     return () => {

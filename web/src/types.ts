@@ -13,11 +13,13 @@ export interface BoardAsset {
   thumbnail: string
 }
 
+export type PostStatus = "draft" | "scheduled" | "sent"
+
 export interface BoardPost {
   id: string
   text: string
   channel_id: string
-  status: string
+  status: PostStatus
   created_at: string
   due_at: string | null
   sent_at: string | null

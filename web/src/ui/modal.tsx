@@ -103,11 +103,5 @@ const ModalViewport = ({ className, ...props }: ModalViewportProps) => {
   );
 };
 
-export type {
-  ModalBackdropProps,
-  ModalOverlayProps,
-  ModalPanelProps,
-  ModalProps,
-  ModalViewportProps,
-};
-export { Modal, ModalBackdrop, ModalOverlay, ModalPanel, ModalViewport };
+export type { ModalProps };
+export { Modal };

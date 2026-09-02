@@ -1,92 +1,13 @@
-import { SkeletonImage } from "@/components/skeleton-image"
+import { PostCard } from "@/components/post-card"
 import { Skeleton } from "@/ui/skeleton"
 import {
   KanbanColumn,
   KanbanColumnContent,
   KanbanColumnHeader,
-  KanbanItem,
 } from "@/components/ui/kanban"
-import { PlatformIcon } from "@/components/ui/platform-icon"
 import type { BoardChannel, GroupedPost } from "@/types"
 
-function channelFor(
-  post: { channel_id: string },
-  channels: BoardChannel[],
-): BoardChannel | undefined {
-  return channels.find((channel) => channel.id === post.channel_id)
-}
-
-function formatDueAt(dueAt: string | null): string | null {
-  if (!dueAt) return null
-  const date = new Date(dueAt)
-  if (Number.isNaN(date.getTime())) return null
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric"
-  })
-}
-
-function PostCard({
-  group,
-  channels,
-  onOpen,
-}: {
-  group: GroupedPost
-  channels: BoardChannel[]
-  onOpen: (group: GroupedPost) => void
-}) {
-  const first = group.posts[0]
-  const asset = first.assets.find((a) => a.thumbnail || a.source)
-  const imageUrl = asset?.thumbnail || asset?.source || null
-  const due = formatDueAt(first.due_at)
-  const services = Array.from(
-    new Set(
-      group.posts
-        .map((p) => channelFor(p, channels)?.service)
-        .filter((s): s is string => Boolean(s)),
-    ),
-  )
-
-  return (
-    <KanbanItem
-      value={group.key}
-      className="overflow-hidden p-0 flex flex-col justify-between items-stretch"
-      onClick={() => onOpen(group)}
-    >
-      <div className="flex min-h-40">
-        {imageUrl && (
-          <SkeletonImage
-            src={imageUrl}
-            alt=""
-            className="h-40 m-0.5 shrink-0 rounded-md overflow-hidden"
-            imgClassName="h-full w-full object-contain"
-            loading="lazy"
-          />
-        )}
-        <div className="flex min-w-0 flex-1 flex-col gap-1 py-2 px-2">
-          <p className="line-clamp-7 text-xs font-medium whitespace-pre-line">
-            {first.text}
-          </p>
-          <div className="mt-auto flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {services.map((service) => (
-                <PlatformIcon key={service} service={service} className="size-4" />
-              ))}
-            </div>
-            {due && (
-              <time className="text-xs font-medium text-fg-muted tabular-nums">
-                {due}
-              </time>
-            )}
-          </div>
-        </div>
-      </div>
-    </KanbanItem>
-  )
-}
-
-
-export function PostCardSkeleton({ withImage = true }: { withImage?: boolean }) {
+function PostCardSkeleton({ withImage = true }: { withImage?: boolean }) {
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border bg-card shadow-sm/5">
       <div className="flex min-h-40">
@@ -124,7 +45,6 @@ export function BoardColumn({
   emptyLabel,
   onOpen,
   loading = false,
-  skeletonCards = 2,
 }: {
   title: string
   columnValue: string
@@ -136,7 +56,6 @@ export function BoardColumn({
   onOpen: (group: GroupedPost) => void
   /** Render placeholder cards instead of the (empty) real ones. */
   loading?: boolean
-  skeletonCards?: number
 }) {
   return (
     <KanbanColumn value={columnValue}>
@@ -150,7 +69,7 @@ export function BoardColumn({
         {loading ? (
           <>
             <span className="sr-only">Loading {title.toLowerCase()}…</span>
-            {Array.from({ length: skeletonCards }, (_, i) => (
+            {Array.from({ length: 2 }, (_, i) => (
               <PostCardSkeleton key={i} withImage={i % 2 === 0} />
             ))}
           </>

@@ -141,32 +141,11 @@ const DialogBody = ({ className, ...props }: DialogBodyProps) => {
   );
 };
 
-type DialogInsetProps = React.ComponentProps<"div">;
-
-const DialogInset = (props: DialogInsetProps) => {
-  return <div data-slot="dialog-inset" {...props} />;
-};
-
-type DialogFooterProps = React.ComponentProps<"footer">;
-
-const DialogFooter = ({ className, ...props }: DialogFooterProps) => {
-  const { footer } = dialogVariants();
-  return (
-    <footer
-      data-slot="dialog-footer"
-      className={footer({ className })}
-      {...props}
-    />
-  );
-};
-
 export type {
   DialogBodyProps,
   DialogContentProps,
   DialogDescriptionProps,
-  DialogFooterProps,
   DialogHeaderProps,
-  DialogInsetProps,
   DialogProps,
   DialogTitleProps,
 };
@@ -175,8 +154,6 @@ export {
   DialogBody,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogInset,
   DialogTitle,
 };

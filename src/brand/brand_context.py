@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
-    from image_pipeline import ReferenceImage
+    from images.image_pipeline import ReferenceImage
 
 CONTACT_INFO_KEY = "info/contact.json"
 LOGO_KEY = "info/logo.png"
@@ -86,32 +86,33 @@ def infer_asset(key: str) -> ReferenceAsset:
 
     path_parts = PurePosixPath(key).parts
     normalized_parts = [
-        part.casefold().replace("_", "-").replace(" ", "-").rstrip("s")
-        for part in path_parts[:-1]
+        part.casefold().replace("_", "-").replace(" ", "-").rstrip("s") for part in path_parts[:-1]
     ]
     folder = normalized_parts[0] if normalized_parts else ""
+    # Headshot folders carry identity wherever they live: realtor_headshot_single/
+    # and realtor_headshot_with_clients/ are the current bucket layout.
+    headshot_folders = {"headshot", "portrait", "portraits"}
+    group_folders = {"headshot-group", "group-headshot", "group", "client-group"}
+    indoor_folders = {"indoor", "interior"}
+    outdoor_folders = {"outdoor", "exterior"}
+    is_headshot_folder = "headshot" in folder or folder in headshot_folders
     nested_group = folder in {"headshot", "portrait"} and any(
         part in {"group", "client", "client-group"} for part in normalized_parts[1:]
     )
-    # Headshot folders carry identity wherever they live: realtor_headshot_single/
-    # and realtor_headshot_with_clients/ are the current bucket layout.
-    headshot_folder = "headshot" in folder or folder in {"portrait", "portraits"}
-    headshot_group = (
+    if key.casefold() == LOGO_KEY:
+        role: AssetRole = "logo"
+    elif (
         nested_group
-        or folder in {"headshot-group", "group-headshot", "group", "client-group"}
-        or (headshot_folder and ("group" in folder or "client" in folder))
-    )
-    role: AssetRole = (
-        "logo"
-        if key.casefold() == LOGO_KEY
-        else "headshot-group"
-        if headshot_group
-        else "headshot"
-        if headshot_folder
-        else "indoor"
-        if folder in {"indoor", "interior"}
-        else "outdoor"
-        if folder in {"outdoor", "exterior"}
-        else "other"
-    )
+        or folder in group_folders
+        or (is_headshot_folder and ("group" in folder or "client" in folder))
+    ):
+        role = "headshot-group"
+    elif is_headshot_folder:
+        role = "headshot"
+    elif folder in indoor_folders:
+        role = "indoor"
+    elif folder in outdoor_folders:
+        role = "outdoor"
+    else:
+        role = "other"
     return ReferenceAsset(key=key, role=role)

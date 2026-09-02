@@ -107,17 +107,22 @@ Key modules in `src/`:
 
 - `worker.py` — Cloudflare Worker entrypoint. Handles `fetch` for health and
   asset reads, and `scheduled` for the weekly cron.
-- `job.py` — `run_weekly_job` orchestrates the four-stage pipeline and is shared
-  by the Worker, the CLI, and the tests.
-- `social_agent.py` — wraps the OpenAI Agents SDK calls for drafting and
+- `job/` — the weekly pipeline: `runner.py` orchestrates `run_weekly_job`
+  (shared by the Worker, the CLI, and the tests), with phases split across
+  `schedule.py`, `drafts.py`, `references.py`, `channels.py`, `retry.py`,
+  `publishing.py`, and `results.py`.
+- `content/social_agent.py` — wraps the OpenAI Agents SDK calls for drafting and
   performance analysis.
-- `image_pipeline.py` — GPT Image 2 generation and R2 upload.
-- `buffer_client.py` — async GraphQL client for Buffer channel listing, post
-  creation, and metrics.
+- `images/image_pipeline.py` — GPT Image 2 generation and R2 upload.
+- `buffer/` — async GraphQL client (`client.py`, `queries.py`, `models.py`)
+  for Buffer channel listing, post creation, and metrics.
 - `web_api.py` — board endpoint (`/api/board`) backing the web UI; loads
   Buffer drafts and scheduled posts.
+- `board_actions.py` — board mutation endpoints: edit, schedule, delete,
+  and image replace.
 - `settings.py` — reads and validates environment-backed configuration.
-- `cli.py` — local CLI for dry-run, end-to-end, and Buffer inspection.
+- `cli.py` — thin launcher for the `cli/` package: local CLI for dry-run,
+  end-to-end, and Buffer inspection.
 - `web/` — React + shadcn/ui frontend for the access-locked content board.
 
 ## Prerequisites
@@ -425,13 +430,34 @@ The Worker deploys with `pywrangler`, the CLI for Cloudflare Python Workers.
 
 The cron trigger runs every Monday at 14:00 UTC (`0 14 * * MON`).
 
-## Linting
+## Checks
 
-Lint the code with `ruff`:
+Local toolchain — all wired up as `npm run check` at the repo root:
+
+**Python** (ruff for lint/format, ty for type checking):
 
 ```bash
-uv run ruff check src
+uv run ruff check src          # lint
+uv run ruff format --check src # formatting check
+uvx ty check .                 # type check
 ```
+
+**Web** (oxlint for lint, tsc for type checking):
+
+```bash
+cd web
+npm run lint       # oxlint src (config: `.oxlintrc.json`)
+npm run typecheck  # tsc -b
+```
+
+Or everything at once:
+
+```bash
+npm run check
+```
+
+CI runs the same checks in a `checks` job (`.github/workflows/deploy.yml`);
+the `deploy` job runs only after `checks` passes.
 
 ## Notes on dependency versions
 

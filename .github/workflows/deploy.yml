@@ -6,7 +6,41 @@ on:
   workflow_dispatch:
 
 jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Ruff lint
+        run: uv run ruff check src
+
+      - name: Ruff format check
+        run: uv run ruff format --check src
+
+      - name: Type check (ty)
+        run: uv run ty check .
+
+      - name: Install web dependencies
+        run: cd web && npm ci
+
+      - name: Lint web (oxlint)
+        run: cd web && npm run lint
+
+      - name: Type check web (tsc)
+        run: cd web && npm run typecheck
+
   deploy:
+    needs: [checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

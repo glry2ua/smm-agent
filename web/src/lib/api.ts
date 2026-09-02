@@ -13,7 +13,6 @@ export interface MutationResponse {
   results: MutationResultItem[];
   image_url?: string;
   scheduled_at?: string;
-  rescheduled?: boolean;
   error?: string;
 }
 

@@ -45,18 +45,21 @@ function Kanban<T>({ value, onValueChange, getItemValue, disabled = false, child
     [value, onValueChange, getItemValue, disabled],
   )
 
-  const ctx: KanbanContextValue = {
-    columns: value as unknown as Record<string, unknown[]>,
-    getItemId: getItemValue as unknown as (item: unknown) => string,
-    onMove,
-    draggingId,
-    setDraggingId,
-    overColumn,
-    setOverColumn,
-    overItemId,
-    setOverItemId,
-    disabled,
-  }
+  const ctx: KanbanContextValue = React.useMemo(
+    () => ({
+      columns: value as unknown as Record<string, unknown[]>,
+      getItemId: getItemValue as unknown as (item: unknown) => string,
+      onMove,
+      draggingId,
+      setDraggingId,
+      overColumn,
+      setOverColumn,
+      overItemId,
+      setOverItemId,
+      disabled,
+    }),
+    [value, getItemValue, onMove, draggingId, overColumn, overItemId, disabled],
+  )
 
   return <KanbanContext.Provider value={ctx}>{children}</KanbanContext.Provider>
 }

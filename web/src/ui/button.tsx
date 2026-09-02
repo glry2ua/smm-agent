@@ -3,7 +3,6 @@
 import type * as React from "react";
 import * as ButtonPrimitive from "react-aria-components/Button";
 import { composeRenderProps } from "react-aria-components/composeRenderProps";
-import * as LinkPrimitive from "react-aria-components/Link";
 import { type VariantProps, tv } from "tailwind-variants";
 
 import { Loader } from "@/ui/loader";
@@ -44,8 +43,6 @@ const buttonVariants = tv({
     size: "md",
   },
 });
-
-export { buttonVariants as buttonStyles };
 
 type ButtonVariants = VariantProps<typeof buttonVariants>;
 
@@ -100,44 +97,5 @@ const Button = ({
   );
 };
 
-interface LinkButtonProps
-  extends
-    React.ComponentProps<typeof LinkPrimitive.Link>,
-    VariantProps<typeof buttonVariants> {
-  isIconOnly?: boolean;
-}
-
-const LinkButton = ({
-  variant,
-  size,
-  isIconOnly,
-  className,
-  children,
-  ...props
-}: LinkButtonProps) => {
-  const styles = buttonVariants;
-
-  return (
-    <LinkPrimitive.Link
-      data-button=""
-      data-icon-only={isIconOnly ? "" : undefined}
-      className={composeRenderProps(className, (cn) =>
-        styles({ variant, size, isIconOnly, className: cn }),
-      )}
-      {...props}
-    >
-      {composeRenderProps(children, (children) => (
-        <>
-          {typeof children === "string" ? (
-            <span className="truncate">{children}</span>
-          ) : (
-            children
-          )}
-        </>
-      ))}
-    </LinkPrimitive.Link>
-  );
-};
-
-export type { ButtonProps, LinkButtonProps };
-export { Button, LinkButton };
+export type { ButtonProps };
+export { Button };

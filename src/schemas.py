@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal
 
@@ -19,9 +20,51 @@ def _normalized_keywords(values: list[str]) -> list[str]:
     cleaned = [value.strip() for value in values if value.strip()]
     if not 3 <= len(cleaned) <= 8:
         raise ValueError("keywords must contain 3–8 non-empty values")
-    if len(cleaned) != len(set(value.casefold() for value in cleaned)):
+    if len(cleaned) != len({value.casefold() for value in cleaned}):
         raise ValueError("keywords must be unique")
     return cleaned
+
+
+def _render_reference_lines(
+    reference_images: list[object] | None,
+) -> tuple[str, list[str]]:
+    """Render attachment lines and collect their roles for the people constraint."""
+
+    reference_lines: list[str] = []
+    reference_roles: list[str] = []
+    for index, image in enumerate(reference_images or [], start=1):
+        key = str(getattr(image, "key", image))
+        role = str(getattr(image, "role", "other"))
+        description = str(getattr(image, "description", "")).strip()
+        reference_roles.append(role)
+        detail = f"; description={description}" if description else ""
+        reference_lines.append(f"- Attachment {index}: key={key}; role={role}{detail}")
+    return "\n".join(reference_lines) or "- No reference images supplied", reference_roles
+
+
+def _render_business_details(
+    business_fields: Sequence[str],
+    contact_info: ContactInfo | None,
+) -> str:
+    contact_values = {
+        "business_name": contact_info.business_name if contact_info else None,
+        "phone": contact_info.phone if contact_info else None,
+        "city": contact_info.city if contact_info else None,
+        "website": contact_info.website if contact_info else None,
+    }
+    requested_business_details = [
+        f"- {field}: {contact_values[field]}"
+        for field in business_fields
+        if field != "logo" and contact_values.get(field)
+    ]
+    if "logo" in business_fields:
+        requested_business_details.insert(
+            0, "- logo: use the supplied role=logo attachment exactly; never redraw it"
+        )
+    return (
+        "\n".join(requested_business_details)
+        or "- None. Do not render any business identity or contact details."
+    )
 
 
 class ImagePrompt(BaseModel):
@@ -45,9 +88,9 @@ class ImagePrompt(BaseModel):
     supporting_text: str | None = Field(default=None, max_length=100)
     must_include: list[str] = Field(default_factory=list, max_length=6)
     avoid: list[str] = Field(default_factory=list, max_length=8)
-    business_fields: list[
-        Literal["logo", "business_name", "phone", "city", "website"]
-    ] = Field(default_factory=list, max_length=5)
+    business_fields: list[Literal["logo", "business_name", "phone", "city", "website"]] = Field(
+        default_factory=list, max_length=5
+    )
 
     @field_validator(
         "subject", "setting", "composition", "headline", "supporting_text", mode="before"
@@ -83,41 +126,13 @@ class ImagePrompt(BaseModel):
             )
             if line is not None
         ]
-        reference_lines: list[str] = []
-        reference_roles: list[str] = []
-        for index, image in enumerate(reference_images or [], start=1):
-            key = str(getattr(image, "key", image))
-            role = str(getattr(image, "role", "other"))
-            description = str(getattr(image, "description", "")).strip()
-            reference_roles.append(role)
-            detail = f"; description={description}" if description else ""
-            reference_lines.append(f"- Attachment {index}: key={key}; role={role}{detail}")
-        references = "\n".join(reference_lines) or "- No reference images supplied"
+        references, reference_roles = _render_reference_lines(reference_images)
         people_roles = {"headshot", "headshot-group"}
         people_constraint = (
             "Use the attached person or people as the identity source. Preserve every face and "
             "recognizable detail; do not replace, merge, or add people."
             if people_roles.intersection(reference_roles)
             else "Do not add people."
-        )
-        contact_values = {
-            "business_name": contact_info.business_name if contact_info else None,
-            "phone": contact_info.phone if contact_info else None,
-            "city": contact_info.city if contact_info else None,
-            "website": contact_info.website if contact_info else None,
-        }
-        requested_business_details = [
-            f"- {field}: {contact_values[field]}"
-            for field in self.business_fields
-            if field != "logo" and contact_values.get(field)
-        ]
-        if "logo" in self.business_fields:
-            requested_business_details.insert(
-                0, "- logo: use the supplied role=logo attachment exactly; never redraw it"
-            )
-        business_details = (
-            "\n".join(requested_business_details)
-            or "- None. Do not render any business identity or contact details."
         )
         return render_agent(
             "image-renderer",
@@ -129,7 +144,7 @@ class ImagePrompt(BaseModel):
                 "composition": self.composition,
                 "headline": self.headline,
                 "copy_lines": "\n".join(copy_lines),
-                "business_details": business_details,
+                "business_details": _render_business_details(self.business_fields, contact_info),
                 "references": references,
                 "people_constraint": people_constraint,
             },

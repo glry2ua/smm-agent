@@ -23,5 +23,5 @@ export function groupPosts(posts: BoardPost[]): GroupedPost[] {
       groups.set(key, [post])
     }
   }
-  return Array.from(groups, ([key, posts]) => ({ key, posts }))
+  return Array.from(groups, ([key, group]) => ({ key, posts: group }))
 }
