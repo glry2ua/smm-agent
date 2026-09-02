@@ -5,10 +5,10 @@ from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import AsyncMock, patch
 
+import job
 from brand.brand_context import ContactInfo, ReferenceAsset
 from buffer.client import BufferAPIError, BufferChannel
 from images.image_pipeline import GeneratedImage, ReferenceImage
-import job
 from job import (
     _generate_and_save,
     _generate_valid_draft,
@@ -897,6 +897,134 @@ class AgentRevisionTest(IsolatedAsyncioTestCase):
         self.assertIn("Rejected draft", feedback)
         self.assertEqual(result["drafts"][0]["description"], "Supported concept")
         self.assertEqual(result["drafts"][0]["reference_image_keys"], [])
+
+    async def test_accepts_whitespace_normalized_reference_key_echoes(self) -> None:
+        settings = Settings.from_env(
+            {
+                "OPENAI_API_KEY": "openai-key",
+                "OPENAI_IMAGE_MODEL": "gpt-image-2",
+                "OPENAI_IMAGE_WIDTH": "1088",
+                "OPENAI_IMAGE_HEIGHT": "1360",
+                "OPENAI_IMAGE_QUALITY": "medium",
+                "BUFFER_API_KEY": "buffer-key",
+                "BUFFER_ORGANIZATION_ID": "organization-id",
+                "BUFFER_API_URL": "https://api.buffer.com",
+                "MIN_SCHEDULE_LEAD_MINUTES": "30",
+                "SCHEDULE_HORIZON_DAYS": "8",
+                "MAX_POST_CHARS": "5000",
+                "RETRY_MAX_ATTEMPTS": "3",
+                "RETRY_BACKOFF_SECONDS": "0",
+            }
+        )
+        due_at = datetime(2026, 8, 17, 15, 30, tzinfo=UTC)
+        canonical_key = "indoor/    San Jose Bright High Ceiling Living Room.png"
+        accepted = SocialPostDraft(
+            description="Indoor concept",
+            keywords=["one", "two", "three"],
+            image_prompt=ImagePrompt(
+                visual_type="property-editorial",
+                reference_policy="indoor-flexible",
+                subject="A bright open living room tour",
+                setting="Indoor living room",
+                composition="Full-bleed photograph with a quiet overlay zone",
+                headline="TOUR THE SPACE",
+            ),
+            # The model echoed the key with whitespace runs collapsed.
+            reference_image_keys=[
+                "indoor/San Jose Bright High Ceiling Living Room.png",
+                "info/logo.png",
+            ],
+            due_at=due_at,
+        )
+        indoor = ReferenceAsset(canonical_key, "indoor")
+        logo = ReferenceAsset("info/logo.png", "logo")
+
+        with patch(
+            "job.generate_social_post",
+            new=AsyncMock(return_value=accepted),
+        ) as generate:
+            preparation = await _generate_valid_draft(
+                settings,
+                "Selling and Buying Simultaneously in Silicon Valley",
+                due_at,
+                [canonical_key, logo.key],
+                None,
+                None,
+                [indoor, logo],
+                {canonical_key: indoor, logo.key: logo},
+                datetime(2026, 8, 17, 14, tzinfo=UTC),
+                require_headshot_reference=False,
+            )
+
+        self.assertEqual(generate.await_count, 1)
+        self.assertFalse(preparation.fallback_used)
+        self.assertEqual(preparation.attempts, 1)
+        self.assertEqual(
+            preparation.draft.reference_image_keys,
+            [canonical_key, "info/logo.png"],
+        )
+
+    async def test_unavailable_key_error_suggests_closest_catalog_key(self) -> None:
+        settings = Settings.from_env(
+            {
+                "OPENAI_API_KEY": "openai-key",
+                "OPENAI_IMAGE_MODEL": "gpt-image-2",
+                "OPENAI_IMAGE_WIDTH": "1088",
+                "OPENAI_IMAGE_HEIGHT": "1360",
+                "OPENAI_IMAGE_QUALITY": "medium",
+                "BUFFER_API_KEY": "buffer-key",
+                "BUFFER_ORGANIZATION_ID": "organization-id",
+                "BUFFER_API_URL": "https://api.buffer.com",
+                "MIN_SCHEDULE_LEAD_MINUTES": "30",
+                "SCHEDULE_HORIZON_DAYS": "8",
+                "MAX_POST_CHARS": "5000",
+                "RETRY_MAX_ATTEMPTS": "1",
+                "RETRY_BACKOFF_SECONDS": "0",
+            }
+        )
+        due_at = datetime(2026, 8, 17, 15, 30, tzinfo=UTC)
+        canonical_key = "indoor/    San Jose Bright High Ceiling Living Room.png"
+        renamed = SocialPostDraft(
+            description="Wrong filename concept",
+            keywords=["one", "two", "three"],
+            image_prompt=ImagePrompt(
+                visual_type="property-editorial",
+                reference_policy="indoor-flexible",
+                subject="A bright open living room tour",
+                setting="Indoor living room",
+                composition="Full-bleed photograph with a quiet overlay zone",
+                headline="TOUR THE SPACE",
+            ),
+            reference_image_keys=[
+                "indoor/San Jose Bright High Ceiling Living Area.png",
+            ],
+            due_at=due_at,
+        )
+        indoor = ReferenceAsset(canonical_key, "indoor")
+
+        with patch(
+            "job.generate_social_post",
+            new=AsyncMock(return_value=renamed),
+        ) as generate:
+            preparation = await _generate_valid_draft(
+                settings,
+                "Selling and Buying Simultaneously in Silicon Valley",
+                due_at,
+                [canonical_key],
+                None,
+                None,
+                [indoor],
+                {canonical_key: indoor},
+                datetime(2026, 8, 17, 14, tzinfo=UTC),
+                require_headshot_reference=False,
+            )
+
+        self.assertEqual(generate.await_count, 3)
+        self.assertTrue(preparation.fallback_used)
+        self.assertEqual(len(preparation.validation_errors), 3)
+        for error in preparation.validation_errors:
+            self.assertIn("did you mean", error)
+            self.assertIn(canonical_key, error)
 
     async def test_uses_deterministic_visual_fallback_after_three_invalid_drafts(self) -> None:
         settings = Settings.from_env(

@@ -92,14 +92,21 @@ def infer_asset(key: str) -> ReferenceAsset:
     nested_group = folder in {"headshot", "portrait"} and any(
         part in {"group", "client", "client-group"} for part in normalized_parts[1:]
     )
+    # Headshot folders carry identity wherever they live: realtor_headshot_single/
+    # and realtor_headshot_with_clients/ are the current bucket layout.
+    headshot_folder = "headshot" in folder or folder in {"portrait", "portraits"}
+    headshot_group = (
+        nested_group
+        or folder in {"headshot-group", "group-headshot", "group", "client-group"}
+        or (headshot_folder and ("group" in folder or "client" in folder))
+    )
     role: AssetRole = (
         "logo"
         if key.casefold() == LOGO_KEY
         else "headshot-group"
-        if nested_group
-        or folder in {"headshot-group", "group-headshot", "group", "client-group"}
+        if headshot_group
         else "headshot"
-        if folder in {"headshot", "portrait"}
+        if headshot_folder
         else "indoor"
         if folder in {"indoor", "interior"}
         else "outdoor"

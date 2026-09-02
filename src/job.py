@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import sys
 from collections.abc import Awaitable, Callable
@@ -224,7 +225,9 @@ async def _with_retries[T](
         except Exception:
             if attempt == max_attempts:
                 raise
-            await asyncio.sleep(min(backoff_seconds * (2 ** (attempt - 1)), MAX_RETRY_DELAY_SECONDS))
+            await asyncio.sleep(
+                min(backoff_seconds * (2 ** (attempt - 1)), MAX_RETRY_DELAY_SECONDS)
+            )
     raise RuntimeError("unreachable")
 
 
@@ -655,6 +658,41 @@ def _reference_assets(listed_keys: list[str], *, include_logo: bool) -> list[Ref
     return [asset for asset in assets if asset.role != "other"]
 
 
+def _canonical_reference_index(catalog_keys: list[str]) -> dict[str, str | None]:
+    """Index catalog keys by a whitespace/case-insensitive form.
+
+    The editor model normalizes whitespace when echoing keys back (e.g. it
+    collapses the runs of spaces that several R2 object names contain), so an
+    exact-match-only catalog would reject valid selections. Keys that differ
+    only in whitespace or case map to the same entry; ambiguous collisions map
+    to ``None`` so no wrong image is ever silently chosen.
+    """
+
+    index: dict[str, str | None] = {}
+    for key in catalog_keys:
+        normalized = "".join(key.split()).casefold()
+        index[normalized] = None if normalized in index else key
+    return index
+
+
+def _canonical_reference_key(key: str, index: dict[str, str | None]) -> str | None:
+    """Return the canonical catalog key the model's echoed key refers to."""
+
+    return index.get("".join(key.split()).casefold())
+
+
+def _unavailable_keys_error(unavailable: list[str], catalog_keys: list[str]) -> ValueError:
+    """Describe unavailable echoed keys, suggesting the closest catalog key."""
+
+    parts: list[str] = []
+    for key in unavailable:
+        close = difflib.get_close_matches(key, catalog_keys, n=1, cutoff=0.6)
+        parts.append(key + (f" (did you mean {close[0]!r}?)" if close else ""))
+    return ValueError(
+        "reference_image_keys contains unavailable keys: " + ", ".join(parts)
+    )
+
+
 async def _generate_draft(
     settings: Settings,
     topic: str,
@@ -697,7 +735,6 @@ async def _generate_valid_draft(
     require_headshot_reference: bool,
 ) -> DraftPreparation:
     revision_feedback: str | None = None
-    catalog_set = set(reference_keys)
     errors: list[str] = []
     last_draft: SocialPostDraft | None = None
     for attempt in range(1, MAX_DRAFT_ATTEMPTS + 1):
@@ -729,17 +766,20 @@ async def _generate_valid_draft(
             continue
         last_draft = draft
         requested_keys = list(dict.fromkeys(draft.reference_image_keys))
-        unavailable_keys = [key for key in requested_keys if key not in catalog_set]
-        selected_keys = list(
-            key for key in requested_keys if key in catalog_set
-        )[:3]
+        reference_index = _canonical_reference_index(reference_keys)
+        selected_keys: list[str] = []
+        unavailable_keys: list[str] = []
+        for key in requested_keys:
+            canonical = _canonical_reference_key(key, reference_index)
+            if canonical is None:
+                unavailable_keys.append(key)
+            elif canonical not in selected_keys:
+                selected_keys.append(canonical)
+        selected_keys = selected_keys[:3]
         draft = draft.model_copy(update={"reference_image_keys": selected_keys})
         try:
             if unavailable_keys:
-                raise ValueError(
-                    "reference_image_keys contains unavailable keys: "
-                    + ", ".join(unavailable_keys)
-                )
+                raise _unavailable_keys_error(unavailable_keys, reference_keys)
             validate_draft(draft, settings, now)
             validate_reference_policy(draft, selected_keys, asset_catalog, contact_info)
             if require_headshot_reference and (

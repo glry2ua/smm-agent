@@ -44,3 +44,13 @@ class ReferenceRoleTest(TestCase):
             "headshot-group",
         )
         self.assertEqual(infer_asset("info/logo.png").role, "logo")
+
+    def test_maps_realtor_headshot_folders_to_identity_roles(self) -> None:
+        self.assertEqual(
+            infer_asset("realtor_headshot_single/MinhHeadshot.png").role,
+            "headshot",
+        )
+        self.assertEqual(
+            infer_asset("realtor_headshot_with_clients/MinhWithClient.png").role,
+            "headshot-group",
+        )
