@@ -84,8 +84,12 @@ Setup:
 cp .env.example .env          # fill in OPENAI_API_KEY, BUFFER_API_KEY,
                               # BUFFER_ORGANIZATION_ID, ASSET_PUBLIC_BASE_URL
 uv sync                       # install Python dependencies
+npx wrangler d1 create smm-agent-db
+npx wrangler r2 bucket create smm-agent-assets
 npx wrangler d1 list          # find your database_id
-sed 's/<your-database-id>/<the-id-from-d1-list>/' \
+sed -e 's/<your-database-id>/<the-id-from-d1-list>/' \
+    -e 's/<your-database-name>/smm-agent-db/' \
+    -e 's/<your-bucket-name>/smm-agent-assets/' \
   wrangler.example.jsonc > wrangler.jsonc
 uv run pywrangler sync        # one-time: vendor Python deps for wrangler
 npm run build                 # build the web frontend + vendor deps

@@ -20,10 +20,9 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "smm-agent-db",
+      "database_name": "<your-database-name>",
       "database_id": "<your-database-id>",
-      // Dev = prod: wrangler dev runs local code against the real deployed D1.
-      // Ignored by `wrangler deploy`.
+      // Dev = prod: wrangler dev uses the real deployed resources; ignored by deploy.
       "remote": true,
       "migrations_dir": "migrations"
     }
@@ -31,9 +30,7 @@
   "r2_buckets": [
     {
       "binding": "ASSETS",
-      "bucket_name": "smm-agent-assets",
-      // Dev = prod: wrangler dev uses the real deployed R2 bucket.
-      // Ignored by `wrangler deploy`.
+      "bucket_name": "<your-bucket-name>",
       "remote": true
     }
   ]
