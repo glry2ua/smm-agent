@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from buffer.client import BufferClient
+from buffer.client import BufferAPIError, BufferClient
 from settings import Settings
 
 LOOKBACK_DAYS = 30
@@ -14,6 +15,50 @@ LOOKAHEAD_DAYS = 90
 
 DRAFT_STATUS = "draft"
 ACCEPTED_STATUS = "scheduled"
+
+# Buffer's quotas are brutal (250 calls/24h shared across key + integrations)
+# and each raw board load costs 3 calls. Cache per-isolate: channels barely
+# ever change; posts are cached briefly and invalidated by mutations. When
+# Buffer rate-limits us, serve the stale board instead of an error.
+CHANNELS_TTL_SECONDS = 600
+BOARD_TTL_SECONDS = 60
+_CACHE: dict[str, tuple[float, Any]] = {}
+
+
+def invalidate_board_cache() -> None:
+    """Drop cached board data after a successful mutation."""
+    for key in list(_CACHE):
+        if key.startswith("board:"):
+            del _CACHE[key]
+
+
+async def load_board_cached(
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    fresh: bool = False,
+) -> dict[str, Any]:
+    """``load_board`` behind the TTL cache, falling back to stale data on 429.
+
+    ``fresh`` skips the board TTL for explicit user reloads; the channels
+    cache and the stale-on-429 fallback still apply.
+    """
+    key = f"board:{settings.buffer_organization_id}"
+    now_mono = time.monotonic()
+    hit = _CACHE.get(key)
+    if not fresh and hit is not None and now_mono - hit[0] < BOARD_TTL_SECONDS:
+        return hit[1]
+
+    try:
+        board = await load_board(settings, now=now)
+    except BufferAPIError as exc:
+        if exc.status_code == 429 and hit is not None:
+            # Rate-limited: stale data beats no data. Keep the original
+            # fetched_at so the UI shows how old it is.
+            return hit[1]
+        raise
+    _CACHE[key] = (now_mono, board)
+    return board
 
 
 def _origin_relative(url: str, base_url: str) -> str:
@@ -70,7 +115,16 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
     start = reference.astimezone(UTC) - timedelta(days=LOOKBACK_DAYS)
     end = reference.astimezone(UTC) + timedelta(days=LOOKAHEAD_DAYS)
 
-    channels = await client.list_available_channels(settings.buffer_organization_id)
+    channels_key = f"channels:{settings.buffer_organization_id}"
+    now_mono = time.monotonic()
+    hit = _CACHE.get(channels_key)
+    if hit is not None and now_mono - hit[0] < CHANNELS_TTL_SECONDS:
+        channels = hit[1]
+    else:
+        channels = await client.list_available_channels(
+            settings.buffer_organization_id
+        )
+        _CACHE[channels_key] = (now_mono, channels)
     channel_ids = [channel.id for channel in channels]
     if not channel_ids:
         return {

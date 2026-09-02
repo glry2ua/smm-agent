@@ -1,6 +1,6 @@
 import { useState } from "react"
 
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 type ImgProps = Omit<React.ComponentProps<"img">, "src" | "className" | "alt">

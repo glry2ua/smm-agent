@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from workers import Response, WorkerEntrypoint
 
@@ -17,25 +17,46 @@ from board_actions import (
     schedule_posts,
     update_post_text,
 )
+from buffer.client import BufferAPIError
 from images.image_pipeline import GENERATED_GRAPHICS_PATH_PREFIX, R2ImageAssetStore
 from job import run_weekly_job
 from settings import Settings
-from web_api import load_board
+from web_api import invalidate_board_cache, load_board_cached
 
 
-def _json_response(body: dict[str, object], *, status: int = 200) -> Response:
+def _json_response(
+    body: dict[str, object],
+    *,
+    status: int = 200,
+    headers: dict[str, str] | None = None,
+) -> Response:
     return Response(
         json.dumps(body, default=str),
         status=status,
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        headers={"Content-Type": "application/json; charset=utf-8", **(headers or {})},
     )
 
 
 def _error_response(exc: Exception) -> Response:
     status = 400 if isinstance(exc, ValueError) else 500
+    headers: dict[str, str] = {}
+    if isinstance(exc, BufferAPIError):
+        # Propagate Buffer's status (e.g. 429) instead of masking it as 500,
+        # and forward Retry-After so clients can back off.
+        if exc.status_code is not None:
+            status = exc.status_code
+        if exc.retry_after:
+            headers["Retry-After"] = str(int(exc.retry_after) + 1)
+        if status == 429:
+            return _json_response(
+                {"error": "Buffer is rate-limiting this API key. Wait a minute and refresh."},
+                status=status,
+                headers=headers,
+            )
     return _json_response(
         {"error": f"{type(exc).__name__}: {exc}"},
         status=status,
+        headers=headers,
     )
 
 
@@ -89,8 +110,11 @@ class Default(WorkerEntrypoint):
         if request.method == "GET" and path == "/health":
             return _json_response({"ok": True, "service": "smm-agent"})
         if request.method == "GET" and path == "/api/board":
+            # `?fresh=1` = explicit user reload: skip the board TTL. Regular
+            # page views are served from the client cache or the board TTL.
+            fresh = "fresh" in parse_qs(parsed.query)
             try:
-                board = await load_board(settings)
+                board = await load_board_cached(settings, fresh=fresh)
             except Exception as exc:
                 return _error_response(exc)
             return _json_response(board)
@@ -103,6 +127,7 @@ class Default(WorkerEntrypoint):
                 result = await update_post_text(settings, _post_entries(body), text)
             except Exception as exc:
                 return _error_response(exc)
+            invalidate_board_cache()
             return _json_response(result)  # type: ignore[arg-type]
         if path == "/api/posts/accept" and request.method == "POST":
             try:
@@ -116,6 +141,7 @@ class Default(WorkerEntrypoint):
                 )
             except Exception as exc:
                 return _error_response(exc)
+            invalidate_board_cache()
             return _json_response(result)  # type: ignore[arg-type]
         if path == "/api/posts/delete" and request.method == "POST":
             try:
@@ -123,6 +149,7 @@ class Default(WorkerEntrypoint):
                 result = await delete_posts(settings, _post_entries(body))
             except Exception as exc:
                 return _error_response(exc)
+            invalidate_board_cache()
             return _json_response(result)  # type: ignore[arg-type]
         if path == "/api/posts/image" and request.method == "POST":
             try:
@@ -134,6 +161,7 @@ class Default(WorkerEntrypoint):
                 result = await replace_post_image(settings, store, _post_entries(body), dict(image))
             except Exception as exc:
                 return _error_response(exc)
+            invalidate_board_cache()
             return _json_response(result)  # type: ignore[arg-type]
         if path == "/api/posts/image/ai" and request.method == "POST":
             try:
@@ -142,6 +170,7 @@ class Default(WorkerEntrypoint):
                 result = await ai_edit_post_image(settings, store, _post_entries(body), body)
             except Exception as exc:
                 return _error_response(exc)
+            invalidate_board_cache()
             return _json_response(result)  # type: ignore[arg-type]
         if path == "/api/posts/rewrite" and request.method == "POST":
             try:

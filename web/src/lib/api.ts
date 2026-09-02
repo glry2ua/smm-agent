@@ -55,6 +55,9 @@ export function friendlyError(err: unknown): string {
       message = message.slice(prefix.length)
     }
   }
+  if (/\(429\)|rate-limit/i.test(message)) {
+    return "Buffer is rate-limiting requests right now. Wait a minute and try again."
+  }
   if (message.includes("Failed to fetch") || message.includes("Network error")) {
     return "Couldn't reach the server. Check your connection and try again."
   }

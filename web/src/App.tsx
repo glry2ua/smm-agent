@@ -1,19 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { RefreshCw } from "lucide-react"
+import { CircleCheck, PenLine, RefreshCw, type LucideIcon } from "lucide-react"
 
 import { BoardColumn } from "@/components/board-column"
 import { PostModal } from "@/components/post-modal"
-import { Button } from "@/components/ui/button"
 import { Kanban, KanbanBoard } from "@/components/ui/kanban"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useBoard } from "@/hooks/use-board"
 import { groupPosts } from "@/lib/grouping"
+import { Button } from "@/ui/button"
+import { Skeleton } from "@/ui/skeleton"
 import { cn } from "@/lib/utils"
 import type { GroupedPost } from "@/types"
 
-const COLUMNS: { key: string; title: string; emptyLabel: string }[] = [
-  { key: "drafts", title: "Drafts", emptyLabel: "No drafts right now." },
-  { key: "accepted", title: "Accepted", emptyLabel: "No accepted posts yet." },
+/** Lucide icons are stroke-only; `fill` paints the enclosed paths solid. */
+function filled(Icon: LucideIcon) {
+  return function FilledIcon({ className }: { className?: string }) {
+    return <Icon className={className} fill="currentColor" />
+  }
+}
+
+const COLUMNS: {
+  key: string
+  title: string
+  icon: React.ComponentType<{ className?: string }>
+  accent: string
+  emptyLabel: string
+}[] = [
+  {
+    key: "drafts",
+    title: "Drafts",
+    icon: filled(PenLine),
+    accent: "text-orange-600",
+    emptyLabel: "No drafts right now.",
+  },
+  {
+    key: "accepted",
+    title: "Accepted",
+    icon: filled(CircleCheck),
+    accent: "text-green-600",
+    emptyLabel: "No accepted posts yet.",
+  },
 ]
 
 function formatFetchedAt(value: string): string {
@@ -99,7 +124,7 @@ export default function App() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Content Board</h1>
           {board ? (
-            <p className="text-muted-foreground text-sm">
+            <p className="text-fg-muted text-sm">
               Last updated {formatFetchedAt(board.fetched_at)}
             </p>
           ) : showSkeletons ? (
@@ -107,10 +132,10 @@ export default function App() {
           ) : null}
         </div>
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
-          onClick={() => refresh()}
-          disabled={loading}
+          onPress={() => refresh()}
+          isDisabled={loading}
         >
           <RefreshCw className={cn(refreshing && "animate-spin")} />
           Refresh
@@ -119,9 +144,9 @@ export default function App() {
 
       {!board && error ? (
         <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <p className="text-muted-foreground">Unable to load the content board.</p>
-          <p className="text-destructive text-sm">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => refresh()}>
+          <p className="text-fg-muted">Unable to load the content board.</p>
+          <p className="text-fg-danger text-sm">{error}</p>
+          <Button variant="secondary" size="sm" onPress={() => refresh()}>
             <RefreshCw />
             Retry
           </Button>
@@ -130,7 +155,7 @@ export default function App() {
         <div className="flex flex-col gap-3">
           {/* A failed background refresh keeps the stale board on screen. */}
           {board && error && (
-            <p className="text-destructive text-sm">Couldn’t refresh: {error}</p>
+            <p className="text-fg-danger text-sm">Couldn’t refresh: {error}</p>
           )}
           <Kanban
             value={columns}
@@ -150,6 +175,8 @@ export default function App() {
                 <BoardColumn
                   key={col.key}
                   title={col.title}
+                  icon={col.icon}
+                  accent={col.accent}
                   columnValue={col.key}
                   groups={columns[col.key] ?? []}
                   channels={board?.channels ?? []}
@@ -177,7 +204,7 @@ export default function App() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className="bg-primary text-primary-foreground rounded-full px-4 py-2 text-sm font-medium shadow-lg"
+            className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-fg-on-primary shadow-lg"
           >
             {toast.message}
           </div>

@@ -12,20 +12,39 @@ export interface BoardState {
   refresh: () => void
 }
 
+// Module scope, not component state: it survives Vite HMR remounts and
+// StrictMode double-mounts, so re-rendering the page never re-hits
+// /api/board. Buffer's quota (250 calls/24h) makes every call count.
+let cache: { board: Board } | null = null
+let inFlight: Promise<void> | null = null
+
 export function useBoard(): BoardState {
-  const [board, setBoard] = useState<Board | null>(null)
+  const [board, setBoard] = useState<Board | null>(cache?.board ?? null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(cache === null)
   const [refreshing, setRefreshing] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
 
   const refresh = useCallback(() => setReloadToken((token) => token + 1), [])
 
   useEffect(() => {
+    // Warm cache and no explicit refresh requested: render from memory only.
+    if (cache && reloadToken === 0) {
+      setBoard(cache.board)
+      setError(null)
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     let cancelled = false
     setRefreshing(true)
-    fetch("/api/board")
-      .then(async (response) => {
+
+    const load = async () => {
+      // `fresh=1` bypasses the server's board TTL for explicit user reloads.
+      const url = reloadToken > 0 ? "/api/board?fresh=1" : "/api/board"
+      try {
+        const response = await fetch(url)
         if (!response.ok) {
           // Prefer the server's error message over a bare status code.
           let message = `Board request failed with status ${response.status}`
@@ -39,25 +58,30 @@ export function useBoard(): BoardState {
           }
           throw new Error(message)
         }
-        return response.json() as Promise<Board>
-      })
-      .then((data) => {
+        const data = (await response.json()) as Board
+        cache = { board: data }
         if (!cancelled) {
           setBoard(data)
           setError(null)
         }
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load board")
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) {
           setRefreshing(false)
           setLoading(false)
         }
-      })
+      }
+    }
+
+    // Dedupe concurrent loads (e.g. StrictMode's double effect run) into one
+    // request; both mounts get the same result.
+    inFlight = inFlight ?? load().finally(() => {
+      inFlight = null
+    })
+
     return () => {
       cancelled = true
     }

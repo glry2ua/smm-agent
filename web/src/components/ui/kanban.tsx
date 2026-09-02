@@ -97,7 +97,7 @@ function KanbanBoard({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="kanban-board"
-      className={cn("grid auto-rows-fr gap-4", className)}
+      className={cn("grid auto-rows-fr gap-4 max-w-3xl", className)}
       {...props}
     />
   )
@@ -115,7 +115,7 @@ function KanbanColumn({
       data-slot="kanban-column"
       className={cn(
         "flex min-w-0 flex-col rounded-lg transition-colors",
-        isOver && "bg-accent/40",
+        isOver && "bg-muted/40",
         className,
       )}
       onDragOver={(e) => {
@@ -142,24 +142,30 @@ function KanbanColumn({
 function KanbanColumnHeader({
   title,
   count,
+  icon: Icon,
+  accent,
   className,
 }: {
   title: string
   /** Hidden while the column is still loading; pass null for no badge. */
   count: number | null
+  icon: React.ComponentType<{ className?: string }>
+  /** Tailwind text color class for the icon, e.g. "text-orange-600". */
+  accent: string
   className?: string
 }) {
   return (
     <div
       data-slot="kanban-column-header"
       className={cn(
-        "mb-2.5 flex items-center gap-2.5 px-1 text-sm font-semibold",
+        "mb-2.5 flex items-center gap-2 px-1 text-sm font-semibold",
         className,
       )}
     >
+      <Icon className={cn("size-4", accent)} />
       <span className="line-clamp-1">{title}</span>
       {count !== null && (
-        <span className="text-muted-foreground inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1.5 text-[11px] tabular-nums">
+        <span className="text-fg-muted text-xs tabular-nums">
           {count}
         </span>
       )}
@@ -212,10 +218,10 @@ function KanbanItem({
         ctx.setOverItemId(itemId)
       }}
       className={cn(
-        "rounded-lg border bg-card text-card-foreground shadow-sm transition-opacity",
+        "rounded-lg border bg-card text-card-foreground shadow-sm/5 transition-opacity",
         ctx.disabled ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-40",
-        isOver && "ring-2 ring-ring",
+        isOver && "ring-2 ring-border-focus",
         className,
       )}
       {...props}

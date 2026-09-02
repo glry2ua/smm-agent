@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react"
-import { Loader2 } from "lucide-react"
 
 import { SkeletonImage } from "@/components/skeleton-image"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Button } from "@/components/ui/button"
-import { Dialog } from "@/components/ui/dialog"
+import { Skeleton } from "@/ui/skeleton"
+import { Button } from "@/ui/button"
+import {
+  Dialog,
+  DialogContent,
+} from "@/ui/dialog"
+import { Modal } from "@/ui/modal"
 import { PlatformIcon } from "@/components/ui/platform-icon"
 import { boardApi, friendlyError, type MutationResponse } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -232,270 +235,271 @@ export function PostModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange} className="max-w-3xl">
-      <div className="flex">
-        <div className="bg-muted/40 shrink-0 border-r">
-          {/* `h-full` all the way down keeps the pane (and therefore the
-              skeleton box) at real size while the image is still decoding. */}
-          <div className="relative h-full">
-            {imageUrl ? (
-              <SkeletonImage
-                src={imageUrl}
-                alt=""
-                className="h-full"
-                imgClassName="h-full max-h-[60vh] w-72 object-contain"
-              />
-            ) : (
-              <div className="flex h-64 w-72 items-center justify-center">
-                <p className="text-muted-foreground text-sm">No image</p>
+    <Dialog isOpen={open} onOpenChange={handleOpenChange}>
+      <Modal className="sm:max-w-3xl">
+        <DialogContent>
+          <div className="flex">
+            <div className="bg-muted/40 shrink-0 border-r">
+              {/* `h-full` all the way down keeps the pane (and therefore the
+                  skeleton box) at real size while the image is still decoding. */}
+              <div className="relative h-full">
+                {imageUrl ? (
+                  <SkeletonImage
+                    src={imageUrl}
+                    alt=""
+                    className="h-full"
+                    imgClassName="h-full max-h-[60vh] w-72 object-contain"
+                  />
+                ) : (
+                  <div className="flex h-64 w-72 items-center justify-center">
+                    <p className="text-fg-muted text-sm">No image</p>
+                  </div>
+                )}
+                {/* Cover the previous render while the replacement is in flight. */}
+                {busy === "upload" && (
+                  <Skeleton className="absolute inset-0 rounded-none" />
+                )}
               </div>
-            )}
-            {/* Cover the previous render while the replacement is in flight. */}
-            {busy === "upload" && (
-              <Skeleton className="absolute inset-0 rounded-none" />
-            )}
-          </div>
-          {editing && (
-            <div className="border-t space-y-2 p-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                disabled={pending}
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  event.target.value = ""
-                  if (file) uploadImage(file)
-                }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                disabled={pending}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {busy === "upload" ? <Loader2 className="animate-spin" /> : null}
-                {imageUrl ? "Replace image…" : "Add image…"}
-              </Button>
-              {imageUrl && (
-                <div className="flex gap-2">
+              {editing && (
+                <div className="border-t space-y-2 p-3">
                   <input
-                    className="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1.5 text-xs focus:outline-none"
-                    placeholder='Edit the image with AI, e.g. "make the sky golden hour"'
-                    value={imageInstruction}
-                    onChange={(event) => setImageInstruction(event.target.value)}
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
                     disabled={pending}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && imageInstruction.trim() && !pending)
-                        aiEditImage()
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ""
+                      if (file) uploadImage(file)
                     }}
                   />
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={pending || !imageInstruction.trim()}
-                    title="AI will edit the current image using this instruction"
-                    onClick={aiEditImage}
+                    className="w-full"
+                    isDisabled={pending}
+                    isPending={busy === "upload"}
+                    onPress={() => fileInputRef.current?.click()}
                   >
-                    {busy === "ai-image" ? <Loader2 className="animate-spin" /> : null}
-                    Apply
+                    {imageUrl ? "Replace image…" : "Add image…"}
                   </Button>
+                  {imageUrl && (
+                    <div className="flex gap-2">
+                      <input
+                        className="border-border-control bg-bg min-w-0 flex-1 rounded-md border px-2 py-1.5 text-xs focus:outline-none"
+                        placeholder='Edit the image with AI, e.g. "make the sky golden hour"'
+                        value={imageInstruction}
+                        onChange={(event) => setImageInstruction(event.target.value)}
+                        disabled={pending}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && imageInstruction.trim() && !pending)
+                            aiEditImage()
+                        }}
+                      />
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        isDisabled={pending || !imageInstruction.trim()}
+                        isPending={busy === "ai-image"}
+                        aria-label="AI will edit the current image using this instruction"
+                        onPress={aiEditImage}
+                      >
+                        Apply
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-4 p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {Array.from(
-                new Set(
-                  group.posts
-                    .map((p) => channelFor(p, channels)?.service)
-                    .filter((s): s is string => Boolean(s)),
-                ),
-              ).map((service) => (
-                <PlatformIcon key={service} service={service} className="size-5" />
-              ))}
-              <span className="text-muted-foreground text-xs">
-                {group.posts.length} {group.posts.length === 1 ? "post" : "posts"}
-              </span>
-            </div>
-            {due && (
-              <time
-                className={`text-sm font-semibold tabular-nums ${
-                  dueStale ? "text-destructive" : ""
-                }`}
-                title={dueStale ? "This time has already passed" : undefined}
-              >
-                {formatDueAt(due)}
-                {dueStale ? " (missed)" : ""}
-              </time>
-            )}
-          </div>
-
-          {editing ? (
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
-              <div className="relative min-h-40 flex-1">
-                <textarea
-                  className={cn(
-                    "border-input bg-background h-full w-full resize-y rounded-md border p-3 text-sm leading-relaxed focus:outline-none",
-                    busy === "rewrite" && "text-transparent caret-transparent",
-                  )}
-                  value={text}
-                  onChange={(event) => setText(event.target.value)}
-                  disabled={pending}
-                />
-                {/* The AI rewrite blanks the draft until the new copy lands. */}
-                {busy === "rewrite" && (
-                  <div className="absolute inset-0 flex flex-col gap-2 p-3">
-                    <Skeleton className="h-3.5 w-full" />
-                    <Skeleton className="h-3.5 w-11/12" />
-                    <Skeleton className="h-3.5 w-9/12" />
-                    <Skeleton className="h-3.5 w-full" />
-                    <Skeleton className="h-3.5 w-7/12" />
-                  </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-4 p-5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {Array.from(
+                    new Set(
+                      group.posts
+                        .map((p) => channelFor(p, channels)?.service)
+                        .filter((s): s is string => Boolean(s)),
+                    ),
+                  ).map((service) => (
+                    <PlatformIcon key={service} service={service} className="size-5" />
+                  ))}
+                  <span className="text-fg-muted text-xs">
+                    {group.posts.length} {group.posts.length === 1 ? "post" : "posts"}
+                  </span>
+                </div>
+                {due && (
+                  <time
+                    className={`text-sm font-semibold tabular-nums ${
+                      dueStale ? "text-fg-danger" : ""
+                    }`}
+                    title={dueStale ? "This time has already passed" : undefined}
+                  >
+                    {formatDueAt(due)}
+                    {dueStale ? " (missed)" : ""}
+                  </time>
                 )}
               </div>
-              <p
-                className={`text-right text-xs tabular-nums ${
-                  overLimit ? "text-destructive" : "text-muted-foreground"
-                }`}
-              >
-                {charCount}/{MAX_CHARS}
-              </p>
-              <div className="flex gap-2">
-                <input
-                  className="border-input bg-background min-w-0 flex-1 rounded-md border px-3 py-2 text-sm focus:outline-none"
-                  placeholder='Ask for changes, e.g. "make it shorter and friendlier"'
-                  value={instruction}
-                  onChange={(event) => setInstruction(event.target.value)}
-                  disabled={pending}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && instruction.trim() && !pending) rewrite()
-                  }}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={rewrite}
-                  disabled={pending || !instruction.trim() || overLimit}
-                  title="AI will rewrite the text above using this instruction"
-                >
-                  {busy === "rewrite" ? <Loader2 className="animate-spin" /> : null}
-                  Apply
-                </Button>
+
+              {editing ? (
+                <div className="flex min-w-0 flex-1 flex-col gap-3">
+                  <div className="relative min-h-40 flex-1">
+                    <textarea
+                      className={cn(
+                        "border-border-control bg-bg h-full w-full resize-y rounded-md border p-3 text-sm leading-relaxed focus:outline-none",
+                        busy === "rewrite" && "text-transparent caret-transparent",
+                      )}
+                      value={text}
+                      onChange={(event) => setText(event.target.value)}
+                      disabled={pending}
+                    />
+                    {/* The AI rewrite blanks the draft until the new copy lands. */}
+                    {busy === "rewrite" && (
+                      <div className="absolute inset-0 flex flex-col gap-2 p-3">
+                        <Skeleton className="h-3.5 w-full" />
+                        <Skeleton className="h-3.5 w-11/12" />
+                        <Skeleton className="h-3.5 w-9/12" />
+                        <Skeleton className="h-3.5 w-full" />
+                        <Skeleton className="h-3.5 w-7/12" />
+                      </div>
+                    )}
+                  </div>
+                  <p
+                    className={`text-right text-xs tabular-nums ${
+                      overLimit ? "text-fg-danger" : "text-fg-muted"
+                    }`}
+                  >
+                    {charCount}/{MAX_CHARS}
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      className="border-border-control bg-bg min-w-0 flex-1 rounded-md border px-3 py-2 text-sm focus:outline-none"
+                      placeholder='Ask for changes, e.g. "make it shorter and friendlier"'
+                      value={instruction}
+                      onChange={(event) => setInstruction(event.target.value)}
+                      disabled={pending}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && instruction.trim() && !pending) rewrite()
+                      }}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onPress={rewrite}
+                      isDisabled={pending || !instruction.trim() || overLimit}
+                      isPending={busy === "rewrite"}
+                      aria-label="AI will rewrite the text above using this instruction"
+                    >
+                      Apply
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm whitespace-pre-line leading-relaxed">{text}</p>
+              )}
+
+              {error && (
+                <div className="bg-danger-muted text-fg-danger rounded-md px-3 py-2 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {confirm === "accept" && (
+                <div className="bg-muted/40 rounded-md px-3 py-2.5 text-sm">
+                  <p className="font-medium">
+                    Publish {group.posts.length > 1 ? `to ${group.posts.length} channels` : "this post"}
+                    {dirty ? " with your edited text" : ""}?
+                  </p>
+                  <p className="text-fg-muted mt-1">
+                    {dueStale
+                      ? "The original time has passed, so it will publish at the next Mon/Wed/Fri 8:30 AM slot."
+                      : `It is scheduled for ${formatDueAt(due)}.`}
+                  </p>
+                </div>
+              )}
+              {confirm === "delete" && (
+                <div className="bg-danger-muted rounded-md px-3 py-2.5 text-sm">
+                  <p className="text-fg-danger font-medium">
+                    Delete this post from Buffer? This can't be undone.
+                  </p>
+                </div>
+              )}
+              {confirm === "discard" && (
+                <div className="bg-muted/40 rounded-md px-3 py-2.5 text-sm">
+                  <p className="font-medium">Discard your unsaved changes?</p>
+                </div>
+              )}
+
+              <div className="mt-auto flex items-center gap-2 pt-2">
+                {pending && <span className="text-fg-muted text-sm">{busyLabel[busy]}</span>}
+                <div className="ml-auto flex items-center gap-2">
+                  {confirm === null && !pending && (
+                    <Button variant="secondary" size="sm" onPress={() => setConfirm("delete")}>
+                      Delete
+                    </Button>
+                  )}
+                  {confirm === "delete" && (
+                    <Button variant="secondary" size="sm" onPress={() => setConfirm(null)} isDisabled={pending}>
+                      Keep post
+                    </Button>
+                  )}
+                  {confirm === "delete" && (
+                    <Button variant="danger" size="sm" onPress={remove} isDisabled={pending} isPending={busy === "delete"}>
+                      Delete forever
+                    </Button>
+                  )}
+                  {editing ? (
+                    <>
+                      <Button variant="secondary" size="sm" onPress={cancelEdit} isDisabled={pending}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onPress={save} isDisabled={pending || overLimit} isPending={busy === "save"}>
+                        Save
+                      </Button>
+                    </>
+                  ) : confirm === null ? (
+                    <>
+                      <Button variant="secondary" size="sm" onPress={() => setEditing(true)} isDisabled={pending}>
+                        Edit
+                      </Button>
+                      <Button size="sm" onPress={() => setConfirm("accept")} isDisabled={pending}>
+                        Accept &amp; schedule
+                      </Button>
+                    </>
+                  ) : confirm === "accept" ? (
+                    <>
+                      <Button variant="secondary" size="sm" onPress={() => setConfirm(null)} isDisabled={pending}>
+                        Not yet
+                      </Button>
+                      <Button size="sm" onPress={accept} isDisabled={pending || overLimit} isPending={busy === "accept"}>
+                        {dueStale ? "Reschedule & publish" : "Yes, schedule it"}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="secondary" size="sm" onPress={() => setConfirm(null)} isDisabled={pending}>
+                        Keep editing
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onPress={() => {
+                          setText(savedText)
+                          setConfirm(null)
+                          handleOpenChange(false)
+                        }}
+                        isDisabled={pending}
+                      >
+                        Discard changes
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          ) : (
-            <p className="text-sm whitespace-pre-line leading-relaxed">{text}</p>
-          )}
-
-          {error && (
-            <div className="bg-destructive/10 text-destructive rounded-md px-3 py-2 text-sm">
-              {error}
-            </div>
-          )}
-
-          {confirm === "accept" && (
-            <div className="bg-accent/40 rounded-md px-3 py-2.5 text-sm">
-              <p className="font-medium">
-                Publish {group.posts.length > 1 ? `to ${group.posts.length} channels` : "this post"}
-                {dirty ? " with your edited text" : ""}?
-              </p>
-              <p className="text-muted-foreground mt-1">
-                {dueStale
-                  ? "The original time has passed, so it will publish at the next Mon/Wed/Fri 8:30 AM slot."
-                  : `It is scheduled for ${formatDueAt(due)}.`}
-              </p>
-            </div>
-          )}
-          {confirm === "delete" && (
-            <div className="bg-destructive/10 rounded-md px-3 py-2.5 text-sm">
-              <p className="text-destructive font-medium">
-                Delete this post from Buffer? This can't be undone.
-              </p>
-            </div>
-          )}
-          {confirm === "discard" && (
-            <div className="bg-accent/40 rounded-md px-3 py-2.5 text-sm">
-              <p className="font-medium">Discard your unsaved changes?</p>
-            </div>
-          )}
-
-          <div className="mt-auto flex items-center gap-2 pt-2">
-            {pending && <span className="text-muted-foreground text-sm">{busyLabel[busy]}</span>}
-            <div className="ml-auto flex items-center gap-2">
-              {confirm === null && !pending && (
-                <Button variant="outline" size="sm" onClick={() => setConfirm("delete")}>
-                  Delete
-                </Button>
-              )}
-              {confirm === "delete" && (
-                <Button variant="outline" size="sm" onClick={() => setConfirm(null)} disabled={pending}>
-                  Keep post
-                </Button>
-              )}
-              {confirm === "delete" && (
-                <Button variant="destructive" size="sm" onClick={remove} disabled={pending}>
-                  {busy === "delete" ? <Loader2 className="animate-spin" /> : null}
-                  Delete forever
-                </Button>
-              )}
-              {editing ? (
-                <>
-                  <Button variant="outline" size="sm" onClick={cancelEdit} disabled={pending}>
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={save} disabled={pending || overLimit}>
-                    {busy === "save" ? <Loader2 className="animate-spin" /> : null}
-                    Save
-                  </Button>
-                </>
-              ) : confirm === null ? (
-                <>
-                  <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={pending}>
-                    Edit
-                  </Button>
-                  <Button size="sm" onClick={() => setConfirm("accept")} disabled={pending}>
-                    Accept &amp; schedule
-                  </Button>
-                </>
-              ) : confirm === "accept" ? (
-                <>
-                  <Button variant="outline" size="sm" onClick={() => setConfirm(null)} disabled={pending}>
-                    Not yet
-                  </Button>
-                  <Button size="sm" onClick={accept} disabled={pending || overLimit}>
-                    {busy === "accept" ? <Loader2 className="animate-spin" /> : null}
-                    {dueStale ? "Reschedule & publish" : "Yes, schedule it"}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button variant="outline" size="sm" onClick={() => setConfirm(null)} disabled={pending}>
-                    Keep editing
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => {
-                      setText(savedText)
-                      setConfirm(null)
-                      handleOpenChange(false)
-                    }}
-                    disabled={pending}
-                  >
-                    Discard changes
-                  </Button>
-                </>
-              )}
-            </div>
           </div>
-        </div>
-      </div>
+        </DialogContent>
+      </Modal>
     </Dialog>
   )
 }

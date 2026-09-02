@@ -1,6 +1,5 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { cn as cnBase } from "tailwind-variants";
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+// Narrowed to `string`: React Aria className render props reject `undefined`.
+export const cn = (...classes: Parameters<typeof cnBase>): string =>
+  cnBase(...classes) ?? "";
