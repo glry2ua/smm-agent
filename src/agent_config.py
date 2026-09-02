@@ -1,15 +1,10 @@
 """Agent definitions, defined directly in code.
 
-Agents used to live in ``agents/*.md`` with frontmatter. Those files are not
-bundled into the Cloudflare Worker (only Python source is), so any worker path
-that loaded them crashed with ``AgentConfigError`` — e.g. editing posts. The
-definitions now live in this module, which is bundled and versioned with the
-rest of the Python source. Instructions are unchanged, ``{{placeholders}}``
-included; see :func:`render_agent`.
+Instructions are stored as ``{{placeholder}}`` templates; see
+:func:`render_agent`.
 """
 
-# Long prompt lines are intentional: they preserve the exact wording of the
-# previous markdown definitions.
+# Long prompt lines are intentional.
 # ruff: noqa: E501
 
 from __future__ import annotations

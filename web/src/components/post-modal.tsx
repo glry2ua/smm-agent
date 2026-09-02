@@ -72,8 +72,6 @@ export function PostModal({
           <DialogTitle className="sr-only">Post details</DialogTitle>
           <div className="flex min-h-0 flex-1 flex-col gap-5 sm:flex-row">
             <div className="flex shrink-0 flex-col gap-3 sm:w-[44%] sm:max-w-[26rem]">
-              {/* The frame bleeds into the modal padding so the image sits
-                  tighter to the edge than the rest of the modal's content. */}
               <div className="border-border/20 bg-muted/60 relative -ml-3 -mt-3 h-[40vh] overflow-hidden rounded-xl border sm:-ml-4 sm:-mt-4 sm:-mb-4 sm:h-auto sm:min-h-0 sm:flex-1">
                 {imageUrl ? (
                   <SkeletonImage
@@ -87,12 +85,9 @@ export function PostModal({
                     <p className="text-fg-muted text-sm">No image</p>
                   </div>
                 )}
-                {/* Cover the previous render while the replacement is in flight. */}
                 {busy === "upload" && (
                   <Skeleton className="absolute inset-0 rounded-none" />
                 )}
-                {/* Upload button floats top-left while editing, fading with
-                    the edit mode transition. */}
                 {!posted && (
                   <div
                     className={cn(
@@ -168,10 +163,6 @@ export function PostModal({
                 </div>
               </div>
 
-              {/* One stable text element in both modes: view mode styles it
-                  like the read-only card, edit mode makes it an editable
-                  textarea — same box, same padding, zero shift. The char
-                  counter floats over its bottom edge. */}
               <div className="relative min-h-40 flex-1">
                 <textarea
                   className={cn(

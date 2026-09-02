@@ -115,8 +115,6 @@ export function TopicsModal({
                   </Button>
                 ))}
               </div>
-              {/* Only meaningful on the Used tab, but kept in the layout on the
-                  other tabs — removing it would shift the pills row. */}
               <Button
                 variant="secondary"
                 size="xs"
@@ -130,8 +128,6 @@ export function TopicsModal({
               </Button>
             </div>
 
-            {/* Always rendered at a fixed height: the modal keeps one stable
-                size whether or not a search is active. */}
             <InputGroup>
               <InputGroupAddon>
                 <IconSearch />
@@ -163,8 +159,6 @@ export function TopicsModal({
               </div>
             )}
 
-            {/* Fixed height with its own scrollbar: the modal keeps one stable
-                size across loading, empty, and filtered states. */}
             <div className="border-border bg-muted/30 h-96 overflow-y-auto rounded-lg border p-2">
               {rows === null && loading ? (
                 <div className="flex h-full flex-col gap-1.5">

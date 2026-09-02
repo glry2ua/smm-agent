@@ -167,9 +167,6 @@ export default function App() {
               </span>
             )}
           </div>
-          {/* Search shares the button cluster: sm inputs and sm buttons are
-              both h-7, and sm:mt-0.5 centers the row on the title's 32px line
-              instead of the taller title + badge block. */}
           <div className="order-2 flex w-full flex-wrap items-center gap-2 sm:mt-0.5 sm:w-auto">
             <InputGroup
               size="sm"
@@ -253,7 +250,6 @@ export default function App() {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {/* A failed background refresh keeps the stale board on screen. */}
             {board && error && (
               <p className="text-fg-danger text-sm">Couldn’t refresh: {error}</p>
             )}

@@ -75,8 +75,6 @@ const DialogContent = ({
               aria-label="Close"
               className={closeButton()}
             >
-              {/* index.css forces .tabler-icon stroke-width via
-                  --icon-stroke-width, overriding the strokeWidth prop. */}
               <IconX style={{ "--icon-stroke-width": "2.5" } as React.CSSProperties} />
             </Button>
           )}
