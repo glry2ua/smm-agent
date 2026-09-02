@@ -1,4 +1,6 @@
 import { mockBoardApi } from "@/lib/mock/board"
+import { mockKeywordsApi } from "@/lib/mock/keywords"
+import type { Keyword } from "@/types"
 
 export interface MutationResultItem {
   id: string
@@ -122,4 +124,21 @@ const realBoardApi = {
   },
 }
 
+/** D1 keyword management (independent of the Buffer-backed board). */
+const realKeywordsApi = {
+  async listKeywords(): Promise<{ keywords: Keyword[] }> {
+    return request("/api/keywords", { method: "GET" })
+  },
+
+  async addKeyword(topic: string): Promise<{ ok: boolean }> {
+    return request("/api/keywords", jsonInit("POST", { topic }))
+  },
+
+  /** Clear used_at. An empty id list resets every used keyword. */
+  async resetKeywords(ids: number[]): Promise<{ ok: boolean; reset: number }> {
+    return request("/api/keywords/reset", jsonInit("POST", { ids }))
+  },
+}
+
 export const boardApi = MOCK ? mockBoardApi : realBoardApi
+export const keywordsApi = MOCK ? mockKeywordsApi : realKeywordsApi

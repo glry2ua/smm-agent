@@ -38,3 +38,10 @@ export interface GroupedPost {
   key: string
   posts: BoardPost[]
 }
+
+/** One row of the D1 `keywords` table: a topic the weekly job can pick. */
+export interface Keyword {
+  id: number
+  topic: string
+  used_at: string | null
+}

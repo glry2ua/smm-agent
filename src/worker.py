@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import asdict
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -22,6 +23,7 @@ from buffer.client import BufferAPIError
 from images.image_pipeline import GENERATED_GRAPHICS_PATH_PREFIX, R2ImageAssetStore
 from job import run_weekly_job
 from settings import Settings
+from topics.topics import TopicStore
 from web_api import invalidate_board_cache, load_board_cached
 
 
@@ -143,6 +145,38 @@ class Default(WorkerEntrypoint):
                 return _error_response(exc)
             board["title"] = await _board_title(self.env)
             return _json_response(board)
+        if request.method == "GET" and path == "/api/keywords":
+            try:
+                keywords = await TopicStore.from_env(self.env).list_keywords()
+            except Exception as exc:
+                return _error_response(exc)
+            return _json_response(
+                {"keywords": [asdict(k) for k in keywords]}  # type: ignore[misc]
+            )
+        if request.method == "POST" and path == "/api/keywords":
+            try:
+                body = await _json_body(request)
+                topic = body.get("topic")
+                if not isinstance(topic, str):
+                    raise ValueError("body.topic must be a string")
+                keyword = await TopicStore.from_env(self.env).add_keyword(topic)
+            except Exception as exc:
+                return _error_response(exc)
+            return _json_response({"ok": True, "keyword": asdict(keyword)})
+        if request.method == "POST" and path == "/api/keywords/reset":
+            try:
+                body = await _json_body(request)
+                store = TopicStore.from_env(self.env)
+                ids = body.get("ids")
+                if isinstance(ids, list):
+                    keyword_ids = [int(i) for i in ids if str(i).strip()]
+                    reset = await store.mark_unused(keyword_ids)
+                else:
+                    # No ids given: reset every used keyword.
+                    reset = await store.mark_all_unused()
+            except Exception as exc:
+                return _error_response(exc)
+            return _json_response({"ok": True, "reset": reset})
         if path == "/api/posts" and request.method == "PATCH":
             try:
                 body = await _json_body(request)

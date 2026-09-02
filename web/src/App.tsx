@@ -5,9 +5,11 @@ import {
   IconClockFilled,
   IconPencilFilled,
   IconRefresh,
+  IconTags,
 } from "@tabler/icons-react"
 
 import { BoardColumn } from "@/components/board-column"
+import { KeywordsModal } from "@/components/keywords-modal"
 import { PostModal } from "@/components/post-modal"
 import { MOCK } from "@/lib/api"
 import { Kanban, KanbanBoard } from "@/components/ui/kanban"
@@ -62,6 +64,7 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false)
   const [openGroup, setOpenGroup] = useState<GroupedPost | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [keywordsOpen, setKeywordsOpen] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextToastId = useRef(1)
 
@@ -161,34 +164,43 @@ export default function App() {
             )}
           </h1>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onPress={() => {
-            requestedRefresh.current = true
-            refresh()
-          }}
-          isDisabled={loading}
-        >
-          <span className="relative flex size-4 items-center justify-center">
-            <IconRefresh
-              className={cn(
-                "absolute transition-all duration-300",
-                refreshing
-                  ? "animate-spin opacity-100"
-                  : "scale-50 opacity-0",
-                justRefreshed && "scale-50 opacity-0",
-              )}
-            />
-            <IconCheck
-              className={cn(
-                "absolute scale-50 text-green-600 opacity-0 transition-all duration-300",
-                justRefreshed && "scale-100 opacity-100",
-              )}
-            />
-          </span>
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onPress={() => setKeywordsOpen(true)}
+          >
+            <IconTags />
+            Keywords
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onPress={() => {
+              requestedRefresh.current = true
+              refresh()
+            }}
+            isDisabled={loading}
+          >
+            Refresh
+            <span className="relative flex size-4 items-center justify-center">
+              <IconRefresh
+                className={cn(
+                  "absolute transition-all duration-300",
+                  !justRefreshed && "opacity-100",
+                  refreshing && "animate-spin",
+                  justRefreshed && "scale-50 opacity-0",
+                )}
+              />
+              <IconCheck
+                className={cn(
+                  "absolute scale-50 opacity-0 transition-all duration-300",
+                  justRefreshed && "scale-100 opacity-100",
+                )}
+              />
+            </span>
+          </Button>
+        </div>
       </header>
 
       {!board && error ? (
@@ -248,6 +260,8 @@ export default function App() {
         onChanged={handleChange}
         notify={notify}
       />
+
+      <KeywordsModal open={keywordsOpen} onOpenChange={setKeywordsOpen} notify={notify} />
 
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((toast) => (
