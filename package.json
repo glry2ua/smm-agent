@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "concurrently -n worker,web \"wrangler dev --port 8787\" \"npm run dev --prefix web\"",
+    "web-mock": "npm run web-mock --prefix web",
     "build": "uv run pywrangler sync && npm run build --prefix web",
     "deploy": "npm run build && wrangler deploy"
   },

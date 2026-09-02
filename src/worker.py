@@ -17,6 +17,7 @@ from board_actions import (
     schedule_posts,
     update_post_text,
 )
+from brand.brand_context import CONTACT_INFO_KEY, parse_contact_info
 from buffer.client import BufferAPIError
 from images.image_pipeline import GENERATED_GRAPHICS_PATH_PREFIX, R2ImageAssetStore
 from job import run_weekly_job
@@ -58,6 +59,29 @@ def _error_response(exc: Exception) -> Response:
         status=status,
         headers=headers,
     )
+
+
+CONTENT_BOARD_FALLBACK_TITLE = "Content Board"
+
+
+async def _board_title(env) -> str:
+    """Board title from R2 contact.json: "{first_name}'s Agent".
+
+    Falls back to the static title when R2 or the payload is unavailable —
+    a broken contact.json should degrade the header, not the board.
+    """
+    try:
+        bucket = getattr(env, "ASSETS", None)
+        if bucket is None:
+            return CONTENT_BOARD_FALLBACK_TITLE
+        asset = await bucket.get(CONTACT_INFO_KEY)
+        if asset is None:
+            return CONTENT_BOARD_FALLBACK_TITLE
+        body = await asset.arrayBuffer()
+        info = parse_contact_info(bytes(body))
+        return f"{info.first_name}'s Agent"
+    except Exception:
+        return CONTENT_BOARD_FALLBACK_TITLE
 
 
 async def _json_body(request) -> dict[str, object]:
@@ -117,6 +141,7 @@ class Default(WorkerEntrypoint):
                 board = await load_board_cached(settings, fresh=fresh)
             except Exception as exc:
                 return _error_response(exc)
+            board["title"] = await _board_title(self.env)
             return _json_response(board)
         if path == "/api/posts" and request.method == "PATCH":
             try:

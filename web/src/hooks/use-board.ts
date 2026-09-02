@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
+import { MOCK } from "@/lib/api"
+import { fetchMockBoard } from "@/lib/mock/board"
 import type { Board } from "@/types"
 
 export interface BoardState {
@@ -19,6 +21,42 @@ let cache: { board: Board } | null = null
 let inFlight: Promise<void> | null = null
 
 export function useBoard(): BoardState {
+  // MOCK is a build-time constant (vite --mode mock); the branch never flips
+  // within a session, so the hook-order difference it implies is safe.
+  return MOCK ? useMockBoard() : useRealBoard()
+}
+
+/** Board state against the in-memory mock store (`npm run web-mock`). */
+function useMockBoard(): BoardState {
+  const [board, setBoard] = useState<Board | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
+
+  const refresh = useCallback(() => setReloadToken((token) => token + 1), [])
+
+  useEffect(() => {
+    let cancelled = false
+    setRefreshing(true)
+    fetchMockBoard()
+      .then((data) => {
+        if (!cancelled) setBoard(data)
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRefreshing(false)
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reloadToken])
+
+  return { board, error: null, loading, refreshing, refresh }
+}
+
+function useRealBoard(): BoardState {
   const [board, setBoard] = useState<Board | null>(cache?.board ?? null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(cache === null)

@@ -5,7 +5,7 @@ import { composeRenderProps } from "react-aria-components/composeRenderProps";
 import * as DialogPrimitive from "react-aria-components/Dialog";
 import * as TextPrimitives from "react-aria-components/Text";
 
-import { XIcon } from "lucide-react";
+import { IconXFilled } from "@tabler/icons-react";
 import { Button } from "@/ui/button";
 import { tv } from "tailwind-variants";
 const dialogVariants = tv({
@@ -71,7 +71,7 @@ const DialogContent = ({
               aria-label="Close"
               className={closeButton()}
             >
-              <XIcon />
+              <IconXFilled />
             </Button>
           )}
         </>

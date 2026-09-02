@@ -97,6 +97,9 @@ export function PostModal({
   }))
   const ids = postRefs.map((ref) => ref.id)
   const due = group.posts[0].due_at
+  const sentAt = group.posts[0].sent_at
+  // Sent posts are immutable in Buffer: show them read-only.
+  const posted = group.posts[0].status === "sent"
   const dueStale = due !== null && new Date(due).getTime() < Date.now()
   const dirty = text !== savedText
   const charCount = text.length
@@ -324,20 +327,33 @@ export function PostModal({
                   ).map((service) => (
                     <PlatformIcon key={service} service={service} className="size-5" />
                   ))}
+                  {posted && (
+                    <span className="rounded-full bg-blue-600/15 px-2 py-0.5 text-xs font-semibold text-blue-600">
+                      Posted
+                    </span>
+                  )}
                   <span className="text-fg-muted text-xs">
                     {group.posts.length} {group.posts.length === 1 ? "post" : "posts"}
                   </span>
                 </div>
-                {due && (
-                  <time
-                    className={`text-sm font-semibold tabular-nums ${
-                      dueStale ? "text-fg-danger" : ""
-                    }`}
-                    title={dueStale ? "This time has already passed" : undefined}
-                  >
-                    {formatDueAt(due)}
-                    {dueStale ? " (missed)" : ""}
-                  </time>
+                {posted ? (
+                  sentAt && (
+                    <time className="text-fg-muted text-sm font-semibold tabular-nums">
+                      {formatDueAt(sentAt)}
+                    </time>
+                  )
+                ) : (
+                  due && (
+                    <time
+                      className={`text-sm font-semibold tabular-nums ${
+                        dueStale ? "text-fg-danger" : ""
+                      }`}
+                      title={dueStale ? "This time has already passed" : undefined}
+                    >
+                      {formatDueAt(due)}
+                      {dueStale ? " (missed)" : ""}
+                    </time>
+                  )
                 )}
               </div>
 
@@ -433,7 +449,7 @@ export function PostModal({
               <div className="mt-auto flex items-center gap-2 pt-2">
                 {pending && <span className="text-fg-muted text-sm">{busyLabel[busy]}</span>}
                 <div className="ml-auto flex items-center gap-2">
-                  {confirm === null && !pending && (
+                  {!posted && confirm === null && !pending && (
                     <Button variant="secondary" size="sm" onPress={() => setConfirm("delete")}>
                       Delete
                     </Button>
@@ -457,7 +473,7 @@ export function PostModal({
                         Save
                       </Button>
                     </>
-                  ) : confirm === null ? (
+                  ) : posted ? null : confirm === null ? (
                     <>
                       <Button variant="secondary" size="sm" onPress={() => setEditing(true)} isDisabled={pending}>
                         Edit

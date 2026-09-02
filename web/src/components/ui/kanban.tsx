@@ -97,7 +97,9 @@ function KanbanBoard({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="kanban-board"
-      className={cn("grid auto-rows-fr gap-4 max-w-3xl", className)}
+      // Cards size to their content (no row stretching): equal-height rows
+      // would inflate short cards with blank space once columns diverge.
+      className={cn("grid gap-5", className)}
       {...props}
     />
   )
@@ -114,8 +116,8 @@ function KanbanColumn({
     <section
       data-slot="kanban-column"
       className={cn(
-        "flex min-w-0 flex-col rounded-lg transition-colors",
-        isOver && "bg-muted/40",
+        "flex min-w-0 flex-col rounded-xl border border-border/20 bg-muted/60 transition-colors",
+        isOver && "bg-muted",
         className,
       )}
       onDragOver={(e) => {
@@ -158,7 +160,7 @@ function KanbanColumnHeader({
     <div
       data-slot="kanban-column-header"
       className={cn(
-        "mb-2.5 flex items-center gap-2 px-1 text-sm font-semibold",
+        "flex items-center gap-2 rounded-t-xl bg-card px-3 py-2.5 text-sm font-semibold shadow-md/2",
         className,
       )}
     >
@@ -180,7 +182,12 @@ function KanbanColumnContent({
   return (
     <div
       data-slot="kanban-column-content"
-      className={cn("flex flex-col gap-2.5 p-0.5", className)}
+      className={cn(
+        // Padding lives here so the header above stays flush with the
+        // column's edges (full-bleed) while cards stay inset.
+        "flex flex-col gap-2.5 px-2 pb-2 pt-2.5",
+        className,
+      )}
       {...props}
     />
   )

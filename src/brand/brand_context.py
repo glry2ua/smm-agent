@@ -22,6 +22,7 @@ class ContactInfo:
     phone: str
     city: str
     website: str
+    first_name: str
 
     def prompt_facts(self) -> str:
         return "\n".join(
@@ -58,7 +59,7 @@ def parse_contact_info(body: bytes) -> ContactInfo:
         raise RuntimeError(f"R2 {CONTACT_INFO_KEY} is not valid UTF-8 JSON") from exc
     if not isinstance(payload, dict):
         raise RuntimeError(f"R2 {CONTACT_INFO_KEY} must contain one JSON object")
-    expected = {"business_name", "phone", "city", "website"}
+    expected = {"business_name", "phone", "city", "website", "first_name"}
     if set(payload) != expected:
         missing = sorted(expected - set(payload))
         extra = sorted(set(payload) - expected)

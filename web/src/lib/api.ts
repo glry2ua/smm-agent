@@ -1,3 +1,5 @@
+import { mockBoardApi } from "@/lib/mock/board"
+
 export interface MutationResultItem {
   id: string
   ok: boolean
@@ -71,7 +73,15 @@ export interface PostRef {
   metadata?: Record<string, unknown> | null
 }
 
-export const boardApi = {
+/**
+ * True when the UI runs on in-memory mock data instead of the worker
+ * (Buffer/D1/R2 assets). Set by `npm run web-mock`, which starts Vite with
+ * `--mode mock` — constant for the whole session, so the mock layer is a
+ * dead branch (and tree-shakeable) in normal dev and production builds.
+ */
+export const MOCK = import.meta.env.VITE_MOCK === "1"
+
+const realBoardApi = {
   async updateText(posts: PostRef[], text: string): Promise<MutationResponse> {
     return request("/api/posts", jsonInit("PATCH", { posts, text }))
   },
@@ -111,3 +121,5 @@ export const boardApi = {
     return request("/api/posts/rewrite", jsonInit("POST", payload))
   },
 }
+
+export const boardApi = MOCK ? mockBoardApi : realBoardApi

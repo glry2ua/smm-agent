@@ -274,7 +274,7 @@ The Worker also serves a minimal kanban board at the root of its origin. The
 board shows two columns:
 
 - **Drafts** — Buffer posts awaiting review (`draft` status).
-- **Accepted** — posts a human scheduled for publication (`scheduled` status).
+- **Scheduled** — posts a human scheduled for publication (`scheduled` status).
 
 The board is read-only for now; interactivity and further features come later.
 
@@ -318,6 +318,20 @@ The UI is at `http://localhost:5173`; the Worker is at `http://localhost:8787`.
 values from `.env` directly. Ctrl-C stops both. If `wrangler dev` fails with
 `ModuleNotFoundError: No module named 'workers'`, run `npm run build` (or
 `uv run pywrangler sync`) to vendor the Python dependencies first.
+
+For UI-only work there's a mock mode with no backend at all — no worker, no
+API keys, no Buffer quota:
+
+```bash
+npm run web-mock
+```
+
+This starts Vite alone (`vite --mode mock`) serving the board from an
+in-memory store (`web/src/lib/mock/board.ts`): fake channels, drafts,
+scheduled/overdue posts, and SVG placeholder images, with simulated latency
+so skeleton and busy states are exercised. Every mutation works and updates
+the store for the session; a page reload resets it. The UI shows a
+"mock data" badge so you never mistake it for the real board.
 
 #### Dev runs against production resources (dev = prod)
 

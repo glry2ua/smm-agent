@@ -2,7 +2,7 @@
 
 import * as ProgressBarPrimitives from "react-aria-components/ProgressBar";
 
-import { Loader2Icon } from "lucide-react";
+import { IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 
 interface LoaderProps extends ProgressBarPrimitives.ProgressBarProps {}
@@ -19,7 +19,7 @@ function Loader({ className, ...props }: LoaderProps) {
       {...props}
       isIndeterminate
     >
-      <Loader2Icon
+      <IconLoader2
         role="status"
         aria-label="Loading"
         className={cn("size-4 animate-spin")}

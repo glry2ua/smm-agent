@@ -26,10 +26,12 @@ export interface BoardPost {
 }
 
 export interface Board {
+  title: string
   fetched_at: string
   channels: BoardChannel[]
   drafts: BoardPost[]
   accepted: BoardPost[]
+  posted: BoardPost[]
 }
 
 export interface GroupedPost {

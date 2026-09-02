@@ -330,12 +330,44 @@
 @utility no-highlight {
     -webkit-tap-highlight-color: transparent;
 }
+  /* Inverse (concave) fillets joining the kanban column header into the
+     column edges: card-colored scoops hang below the header's bottom
+     corners, each with a quarter-disc cut out so the muted column shows
+     through — the header reads as flaring into the panel sides instead of
+     butting against them with a hard 90° corner. */
+  [data-slot="kanban-column-header"] {
+    position: relative;
+}
+  [data-slot="kanban-column-header"]::before,
+  [data-slot="kanban-column-header"]::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    width: 12px;
+    height: 12px;
+    pointer-events: none;
+}
+  [data-slot="kanban-column-header"]::before {
+    left: 0;
+    background: radial-gradient(
+      circle at 100% 100%,
+      transparent 11.5px,
+      var(--color-card) 12px
+    );
+}
+  [data-slot="kanban-column-header"]::after {
+    right: 0;
+    background: radial-gradient(
+      circle at 0% 100%,
+      transparent 11.5px,
+      var(--color-card) 12px
+    );
+}
   ::selection {
     background-color: var(--accent-300);
     color: var(--neutral-950);
 }
-  .lucide,
-.tabler-icon {
+  .tabler-icon {
     stroke-width: var(--icon-stroke-width, 2);
 }
   .hugeicon,

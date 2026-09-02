@@ -1,4 +1,4 @@
-"""Board endpoint for the web UI: current drafts and accepted (scheduled) posts."""
+"""Board endpoint for the web UI: drafts, scheduled, and sent (posted) posts."""
 
 from __future__ import annotations
 
@@ -15,9 +15,10 @@ LOOKAHEAD_DAYS = 90
 
 DRAFT_STATUS = "draft"
 ACCEPTED_STATUS = "scheduled"
+SENT_STATUS = "sent"
 
 # Buffer's quotas are brutal (250 calls/24h shared across key + integrations)
-# and each raw board load costs 3 calls. Cache per-isolate: channels barely
+# and each raw board load costs 4 calls. Cache per-isolate: channels barely
 # ever change; posts are cached briefly and invalidated by mutations. When
 # Buffer rate-limits us, serve the stale board instead of an error.
 CHANNELS_TTL_SECONDS = 600
@@ -132,8 +133,9 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
             "channels": [],
             "drafts": [],
             "accepted": [],
+            "posted": [],
         }
-    drafts, accepted = await asyncio.gather(
+    drafts, accepted, sent = await asyncio.gather(
         client.list_posts(
             settings.buffer_organization_id,
             start=start,
@@ -147,6 +149,13 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
             end=end,
             channel_ids=channel_ids,
             statuses=[ACCEPTED_STATUS],
+        ),
+        client.list_posts(
+            settings.buffer_organization_id,
+            start=start,
+            end=end,
+            channel_ids=channel_ids,
+            statuses=[SENT_STATUS],
         ),
     )
     return {
@@ -167,5 +176,9 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
         "accepted": [
             _card(post, post.channel_id, settings.asset_public_base_url)
             for post in accepted
+        ],
+        "posted": [
+            _card(post, post.channel_id, settings.asset_public_base_url)
+            for post in sent
         ],
     }

@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { CircleCheck, PenLine, RefreshCw, type LucideIcon } from "lucide-react"
+import {
+  IconCheck,
+  IconCircleCheckFilled,
+  IconClockFilled,
+  IconPencilFilled,
+  IconRefresh,
+} from "@tabler/icons-react"
 
 import { BoardColumn } from "@/components/board-column"
 import { PostModal } from "@/components/post-modal"
+import { MOCK } from "@/lib/api"
 import { Kanban, KanbanBoard } from "@/components/ui/kanban"
 import { useBoard } from "@/hooks/use-board"
 import { groupPosts } from "@/lib/grouping"
 import { Button } from "@/ui/button"
-import { Skeleton } from "@/ui/skeleton"
 import { cn } from "@/lib/utils"
 import type { GroupedPost } from "@/types"
-
-/** Lucide icons are stroke-only; `fill` paints the enclosed paths solid. */
-function filled(Icon: LucideIcon) {
-  return function FilledIcon({ className }: { className?: string }) {
-    return <Icon className={className} fill="currentColor" />
-  }
-}
 
 const COLUMNS: {
   key: string
@@ -28,24 +27,25 @@ const COLUMNS: {
   {
     key: "drafts",
     title: "Drafts",
-    icon: filled(PenLine),
+    icon: IconPencilFilled,
     accent: "text-orange-600",
     emptyLabel: "No drafts right now.",
   },
   {
     key: "accepted",
-    title: "Accepted",
-    icon: filled(CircleCheck),
+    title: "Scheduled",
+    icon: IconClockFilled,
     accent: "text-green-600",
-    emptyLabel: "No accepted posts yet.",
+    emptyLabel: "Nothing scheduled yet.",
+  },
+  {
+    key: "posted",
+    title: "Posted",
+    icon: IconCircleCheckFilled,
+    accent: "text-blue-600",
+    emptyLabel: "Nothing posted yet.",
   },
 ]
-
-function formatFetchedAt(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
 
 interface Toast {
   id: number
@@ -57,12 +57,34 @@ export default function App() {
   const [columns, setColumns] = useState<Record<string, GroupedPost[]>>({
     drafts: [],
     accepted: [],
+    posted: [],
   })
   const [hydrated, setHydrated] = useState(false)
   const [openGroup, setOpenGroup] = useState<GroupedPost | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextToastId = useRef(1)
+
+  // After a user-triggered refresh succeeds, briefly swap the refresh icon
+  // for a checkmark. `requestedRef` excludes the initial page load.
+  const [justRefreshed, setJustRefreshed] = useState(false)
+  const requestedRefresh = useRef(false)
+  const awaitingRefreshResult = useRef(false)
+
+  useEffect(() => {
+    if (refreshing) {
+      setJustRefreshed(false)
+      if (requestedRefresh.current) awaitingRefreshResult.current = true
+      return
+    }
+    requestedRefresh.current = false
+    if (!awaitingRefreshResult.current) return
+    awaitingRefreshResult.current = false
+    if (error !== null) return
+    setJustRefreshed(true)
+    const timer = window.setTimeout(() => setJustRefreshed(false), 1600)
+    return () => window.clearTimeout(timer)
+  }, [refreshing, error])
 
   const notify = useCallback((message: string) => {
     const id = nextToastId.current++
@@ -77,6 +99,7 @@ export default function App() {
       setColumns({
         drafts: groupPosts(board.drafts),
         accepted: groupPosts(board.accepted),
+        posted: groupPosts(board.posted),
       })
       setHydrated(true)
     }
@@ -86,7 +109,11 @@ export default function App() {
   // disappeared (e.g. deleted in Buffer while the modal was open).
   useEffect(() => {
     if (!board || !openGroup || !modalOpen) return
-    const all = [...groupPosts(board.drafts), ...groupPosts(board.accepted)]
+    const all = [
+      ...groupPosts(board.drafts),
+      ...groupPosts(board.accepted),
+      ...groupPosts(board.posted),
+    ]
     const fresh = all.find((g) => g.key === openGroup.key)
     if (fresh) {
       setOpenGroup(fresh)
@@ -119,25 +146,47 @@ export default function App() {
   const showSkeletons = board === null && error === null
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-6">
+    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-10 p-6 py-16">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Content Board</h1>
-          {board ? (
-            <p className="text-fg-muted text-sm">
-              Last updated {formatFetchedAt(board.fetched_at)}
-            </p>
-          ) : showSkeletons ? (
-            <Skeleton className="mt-1.5 h-4 w-52" />
-          ) : null}
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            {board?.title ?? "Content Board"}
+            {MOCK && (
+              <span
+                className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600"
+                title="In-memory mock data — run `npm run dev` for the real backend"
+              >
+                mock data
+              </span>
+            )}
+          </h1>
         </div>
         <Button
           variant="secondary"
           size="sm"
-          onPress={() => refresh()}
+          onPress={() => {
+            requestedRefresh.current = true
+            refresh()
+          }}
           isDisabled={loading}
         >
-          <RefreshCw className={cn(refreshing && "animate-spin")} />
+          <span className="relative flex size-4 items-center justify-center">
+            <IconRefresh
+              className={cn(
+                "absolute transition-all duration-300",
+                refreshing
+                  ? "animate-spin opacity-100"
+                  : "scale-50 opacity-0",
+                justRefreshed && "scale-50 opacity-0",
+              )}
+            />
+            <IconCheck
+              className={cn(
+                "absolute scale-50 text-green-600 opacity-0 transition-all duration-300",
+                justRefreshed && "scale-100 opacity-100",
+              )}
+            />
+          </span>
           Refresh
         </Button>
       </header>
@@ -147,7 +196,7 @@ export default function App() {
           <p className="text-fg-muted">Unable to load the content board.</p>
           <p className="text-fg-danger text-sm">{error}</p>
           <Button variant="secondary" size="sm" onPress={() => refresh()}>
-            <RefreshCw />
+            <IconRefresh />
             Retry
           </Button>
         </div>
@@ -165,7 +214,7 @@ export default function App() {
           >
             <KanbanBoard
               className={cn(
-                "grid-cols-1 md:grid-cols-2",
+                "grid-cols-1 md:grid-cols-3",
                 refreshing &&
                   !showSkeletons &&
                   "opacity-70 transition-opacity duration-200",
