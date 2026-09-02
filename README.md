@@ -40,7 +40,7 @@ flowchart TD
     Cron(["Cron trigger<br/>0 14 * * MON"]):::external --> Worker
     subgraph cf ["Cloudflare"]
         Worker["smm-agent Worker<br/>(Python)"]:::cf
-        D1[("D1<br/>smm-agent-db<br/>keywords table")]:::cf
+        D1[("D1<br/>smm-agent-db<br/>topics table")]:::cf
         R2[("R2<br/>smm-agent-assets<br/>references + generated graphics")]:::cf
         Worker -->|pick unused topic| D1
         D1 -->|topic| Worker
@@ -72,7 +72,7 @@ flowchart TD
 
 The weekly job runs on a cron trigger. The pipeline has four stages:
 
-1. **Select topics.** The Worker pulls unused topics from the `keywords` table
+1. **Select topics.** The Worker pulls unused topics from the `topics` table
    in the `smm-agent-db` D1 database. Each topic is marked `used_at` after a
    successful live run, so a topic is never reused.
 2. **Draft posts.** The `social-post-editor` agent uses the OpenAI Agents SDK to
@@ -208,12 +208,12 @@ D1 and R2. It accepts a mode and optional flags.
 ### Modes
 
 - `dry-run` — generates posts and images without calling Buffer `createPost`
-  or marking D1 keywords as used. Image files are written to
+  or marking D1 topics as used. Image files are written to
   `dry_run_outputs/`.
 - `headshot-test` — runs one deterministic dry-run post against a preselected
   Realtor topic with a headshot reference.
 - `end-to-end` — performs production mutations: it creates Buffer scheduled
-  drafts and marks D1 keywords as used.
+  drafts and marks D1 topics as used.
 - `buffer_state` — lists the configured Buffer organization and channels.
 - `buffer_insights` — reports per-channel Buffer metrics for the last 30 days.
 
@@ -221,8 +221,8 @@ D1 and R2. It accepts a mode and optional flags.
 
 - `--json` — print the complete machine-readable result instead of the
   validation report.
-- `--skip-keyword-update` — submit posts without marking the selected D1
-  keywords as used (`end-to-end` only).
+- `--skip-topic-update` — submit posts without marking the selected D1
+  topics as used (`end-to-end` only).
 - `--linkedin` — build and submit posts only for available LinkedIn channels.
 - `--instagram` — build and submit posts only for available Instagram channels.
 - `--facebook` — build and submit posts only for available Facebook channels.
@@ -256,10 +256,10 @@ uv run python src/cli.py headshot-test \
   --reference-image ../media/headshot.png
 ```
 
-Run an end-to-end post on Facebook without marking the keyword as used:
+Run an end-to-end post on Facebook without marking the topic as used:
 
 ```bash
-uv run python src/cli.py end-to-end --facebook --n=1 --skip-keyword-update --force
+uv run python src/cli.py end-to-end --facebook --n=1 --skip-topic-update --force
 ```
 
 List the configured Buffer channels:

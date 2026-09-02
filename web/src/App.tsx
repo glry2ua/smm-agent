@@ -1,30 +1,51 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconCheck,
   IconCircleCheckFilled,
   IconClockFilled,
   IconPencilFilled,
   IconRefresh,
+  IconSearch,
   IconTags,
-} from "@tabler/icons-react"
+  IconX,
+} from "@tabler/icons-react";
 
-import { BoardColumn } from "@/components/board-column"
-import { KeywordsModal } from "@/components/keywords-modal"
-import { PostModal } from "@/components/post-modal"
-import { MOCK } from "@/lib/api"
-import { Kanban, KanbanBoard } from "@/components/ui/kanban"
-import { useBoard } from "@/hooks/use-board"
-import { groupPosts } from "@/lib/grouping"
-import { Button } from "@/ui/button"
-import { cn } from "@/lib/utils"
-import type { GroupedPost } from "@/types"
+import { BoardColumn } from "@/components/board-column";
+import { TopicsModal } from "@/components/topics-modal";
+import { PostModal } from "@/components/post-modal";
+import { MOCK } from "@/lib/api";
+import { Kanban, KanbanBoard } from "@/components/ui/kanban";
+import { useBoard } from "@/hooks/use-board";
+import { groupPosts } from "@/lib/grouping";
+import { Button } from "@/ui/button";
+import { Input, InputGroup, InputGroupAddon } from "@/ui/input";
+import { cn } from "@/lib/utils";
+import type { BoardChannel, GroupedPost } from "@/types";
+
+/** True when a post group matches the board search: post text or channel name. */
+function groupMatches(
+  group: GroupedPost,
+  query: string,
+  channels: BoardChannel[],
+): boolean {
+  if (!query) return true;
+  if (group.posts.some((post) => post.text.toLowerCase().includes(query)))
+    return true;
+  return group.posts.some((post) =>
+    channels.some(
+      (channel) =>
+        channel.id === post.channel_id &&
+        channel.display_name.toLowerCase().includes(query),
+    ),
+  );
+}
 
 const COLUMNS: {
-  key: string
-  title: string
-  icon: React.ComponentType<{ className?: string }>
-  accent: string
-  emptyLabel: string
+  key: string;
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  accent: string;
+  emptyLabel: string;
 }[] = [
   {
     key: "drafts",
@@ -47,55 +68,60 @@ const COLUMNS: {
     accent: "text-blue-600",
     emptyLabel: "Nothing posted yet.",
   },
-]
+];
 
 interface Toast {
-  id: number
-  message: string
+  id: number;
+  message: string;
+  tone?: "info" | "error";
 }
 
 export default function App() {
-  const { board, error, loading, refreshing, refresh } = useBoard()
+  const { board, error, loading, refreshing, refresh } = useBoard();
   const [columns, setColumns] = useState<Record<string, GroupedPost[]>>({
     drafts: [],
     accepted: [],
     posted: [],
-  })
-  const [hydrated, setHydrated] = useState(false)
-  const [openGroup, setOpenGroup] = useState<GroupedPost | null>(null)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [keywordsOpen, setKeywordsOpen] = useState(false)
-  const [toasts, setToasts] = useState<Toast[]>([])
-  const nextToastId = useRef(1)
+  });
+  const [hydrated, setHydrated] = useState(false);
+  const [openGroup, setOpenGroup] = useState<GroupedPost | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [topicsOpen, setTopicsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const nextToastId = useRef(1);
 
   // After a user-triggered refresh succeeds, briefly swap the refresh icon
   // for a checkmark. `requestedRef` excludes the initial page load.
-  const [justRefreshed, setJustRefreshed] = useState(false)
-  const requestedRefresh = useRef(false)
-  const awaitingRefreshResult = useRef(false)
+  const [justRefreshed, setJustRefreshed] = useState(false);
+  const requestedRefresh = useRef(false);
+  const awaitingRefreshResult = useRef(false);
 
   useEffect(() => {
     if (refreshing) {
-      setJustRefreshed(false)
-      if (requestedRefresh.current) awaitingRefreshResult.current = true
-      return
+      setJustRefreshed(false);
+      if (requestedRefresh.current) awaitingRefreshResult.current = true;
+      return;
     }
-    requestedRefresh.current = false
-    if (!awaitingRefreshResult.current) return
-    awaitingRefreshResult.current = false
-    if (error !== null) return
-    setJustRefreshed(true)
-    const timer = window.setTimeout(() => setJustRefreshed(false), 1600)
-    return () => window.clearTimeout(timer)
-  }, [refreshing, error])
+    requestedRefresh.current = false;
+    if (!awaitingRefreshResult.current) return;
+    awaitingRefreshResult.current = false;
+    if (error !== null) return;
+    setJustRefreshed(true);
+    const timer = window.setTimeout(() => setJustRefreshed(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [refreshing, error]);
 
-  const notify = useCallback((message: string) => {
-    const id = nextToastId.current++
-    setToasts((prev) => [...prev, { id, message }])
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 5000)
-  }, [])
+  const notify = useCallback(
+    (message: string, tone: "info" | "error" = "info") => {
+      const id = nextToastId.current++;
+      setToasts((prev) => [...prev, { id, message, tone }]);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 5000);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (board && !hydrated) {
@@ -103,82 +129,124 @@ export default function App() {
         drafts: groupPosts(board.drafts),
         accepted: groupPosts(board.accepted),
         posted: groupPosts(board.posted),
-      })
-      setHydrated(true)
+      });
+      setHydrated(true);
     }
-  }, [board, hydrated])
+  }, [board, hydrated]);
 
   // Keep the open post in sync with fresh board data; close it if the post
   // disappeared (e.g. deleted in Buffer while the modal was open).
   useEffect(() => {
-    if (!board || !openGroup || !modalOpen) return
+    if (!board || !openGroup || !modalOpen) return;
     const all = [
       ...groupPosts(board.drafts),
       ...groupPosts(board.accepted),
       ...groupPosts(board.posted),
-    ]
-    const fresh = all.find((g) => g.key === openGroup.key)
+    ];
+    const fresh = all.find((g) => g.key === openGroup.key);
     if (fresh) {
-      setOpenGroup(fresh)
+      setOpenGroup(fresh);
     } else {
-      setOpenGroup(null)
-      setModalOpen(false)
+      setOpenGroup(null);
+      setModalOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board])
+  }, [board]);
 
   const handleOpen = (group: GroupedPost) => {
-    setOpenGroup(group)
-    setModalOpen(true)
-  }
+    setOpenGroup(group);
+    setModalOpen(true);
+  };
 
   const handleAccepted = () => {
-    setHydrated(false)
-    setModalOpen(false)
-    setOpenGroup(null)
-    refresh()
-  }
+    setHydrated(false);
+    setModalOpen(false);
+    setOpenGroup(null);
+    refresh();
+  };
 
   const handleChange = () => {
-    setHydrated(false)
-    refresh()
-  }
+    setHydrated(false);
+    refresh();
+  };
 
   // Nothing on screen yet: the first fetch is in flight, so every column shows
   // cards taking shape. Background refreshes keep the real cards and dim them.
-  const showSkeletons = board === null && error === null
+  const showSkeletons = board === null && error === null;
+  const query = search.trim().toLowerCase();
+  const channels = board?.channels ?? [];
+  const visibleGroups = (key: string): GroupedPost[] =>
+    (columns[key] ?? []).filter((group) =>
+      groupMatches(group, query, channels),
+    );
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-10 p-6 py-16">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="order-1 min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight">
             {board?.title ?? "Content Board"}
-            {MOCK && (
-              <span
-                className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600"
-                title="In-memory mock data — run `npm run dev` for the real backend"
-              >
-                mock data
-              </span>
-            )}
           </h1>
+          {MOCK && (
+            <span
+              className="mt-1.5 inline-block rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600"
+              title="In-memory mock data — run `npm run dev` for the real backend"
+            >
+              mock data
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        {/* Search shares the button cluster: sm inputs and sm buttons are
+            both h-7, and sm:mt-0.5 centers the row on the title's 32px line
+            instead of the taller title + badge block. */}
+        <div className="order-2 flex w-full flex-wrap items-center gap-2 sm:mt-0.5 sm:w-auto">
+          <InputGroup
+            size="sm"
+            className="min-w-0 flex-1 sm:w-64 sm:flex-none md:w-72"
+          >
+            <InputGroupAddon>
+              <IconSearch />
+            </InputGroupAddon>
+            <Input
+              placeholder="Search posts…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && search !== "") {
+                  event.preventDefault();
+                  setSearch("");
+                }
+              }}
+              aria-label="Search posts"
+            />
+            {search !== "" && (
+              <InputGroupAddon>
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  isIconOnly
+                  onPress={() => setSearch("")}
+                  aria-label="Clear search"
+                >
+                  <IconX />
+                </Button>
+              </InputGroupAddon>
+            )}
+          </InputGroup>
           <Button
             variant="secondary"
             size="sm"
-            onPress={() => setKeywordsOpen(true)}
+            onPress={() => setTopicsOpen(true)}
           >
             <IconTags />
-            Keywords
+            Topics
           </Button>
           <Button
             variant="secondary"
             size="sm"
             onPress={() => {
-              requestedRefresh.current = true
-              refresh()
+              requestedRefresh.current = true;
+              refresh();
             }}
             isDisabled={loading}
           >
@@ -239,9 +307,9 @@ export default function App() {
                   icon={col.icon}
                   accent={col.accent}
                   columnValue={col.key}
-                  groups={columns[col.key] ?? []}
+                  groups={visibleGroups(col.key)}
                   channels={board?.channels ?? []}
-                  emptyLabel={col.emptyLabel}
+                  emptyLabel={query ? "No matching posts." : col.emptyLabel}
                   onOpen={handleOpen}
                   loading={showSkeletons}
                 />
@@ -261,18 +329,27 @@ export default function App() {
         notify={notify}
       />
 
-      <KeywordsModal open={keywordsOpen} onOpenChange={setKeywordsOpen} notify={notify} />
+      <TopicsModal
+        open={topicsOpen}
+        onOpenChange={setTopicsOpen}
+        notify={notify}
+      />
 
       <div className="pointer-events-none fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-fg-on-primary shadow-lg"
+            className={cn(
+              "rounded-full px-4 py-2 text-sm font-medium shadow-lg",
+              toast.tone === "error"
+                ? "bg-danger text-fg-on-danger"
+                : "bg-primary text-fg-on-primary",
+            )}
           >
             {toast.message}
           </div>
         ))}
       </div>
     </main>
-  )
+  );
 }

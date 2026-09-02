@@ -145,38 +145,52 @@ class Default(WorkerEntrypoint):
                 return _error_response(exc)
             board["title"] = await _board_title(self.env)
             return _json_response(board)
-        if request.method == "GET" and path == "/api/keywords":
+        if request.method == "GET" and path == "/api/topics":
             try:
-                keywords = await TopicStore.from_env(self.env).list_keywords()
+                topics = await TopicStore.from_env(self.env).list_topics()
             except Exception as exc:
                 return _error_response(exc)
             return _json_response(
-                {"keywords": [asdict(k) for k in keywords]}  # type: ignore[misc]
+                {"topics": [asdict(t) for t in topics]}  # type: ignore[misc]
             )
-        if request.method == "POST" and path == "/api/keywords":
+        if request.method == "POST" and path == "/api/topics":
             try:
                 body = await _json_body(request)
                 topic = body.get("topic")
                 if not isinstance(topic, str):
                     raise ValueError("body.topic must be a string")
-                keyword = await TopicStore.from_env(self.env).add_keyword(topic)
+                added = await TopicStore.from_env(self.env).add_topic(topic)
             except Exception as exc:
                 return _error_response(exc)
-            return _json_response({"ok": True, "keyword": asdict(keyword)})
-        if request.method == "POST" and path == "/api/keywords/reset":
+            return _json_response({"ok": True, "topic": asdict(added)})
+        if request.method == "POST" and path == "/api/topics/reset":
             try:
                 body = await _json_body(request)
                 store = TopicStore.from_env(self.env)
                 ids = body.get("ids")
                 if isinstance(ids, list):
-                    keyword_ids = [int(i) for i in ids if str(i).strip()]
-                    reset = await store.mark_unused(keyword_ids)
+                    topic_ids = [int(i) for i in ids if str(i).strip()]
+                    reset = await store.mark_unused(topic_ids)
                 else:
-                    # No ids given: reset every used keyword.
+                    # No ids given: reset every used topic.
                     reset = await store.mark_all_unused()
             except Exception as exc:
                 return _error_response(exc)
             return _json_response({"ok": True, "reset": reset})
+        if request.method == "POST" and path == "/api/topics/delete":
+            try:
+                body = await _json_body(request)
+                raw_id = body.get("id")
+                try:
+                    topic_id = int(raw_id)  # type: ignore[arg-type]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("body.id must be a topic ID") from exc
+                deleted = await TopicStore.from_env(self.env).delete_topic(topic_id)
+                if not deleted:
+                    raise ValueError("Topic not found")
+            except Exception as exc:
+                return _error_response(exc)
+            return _json_response({"ok": True, "deleted": True})
         if path == "/api/posts" and request.method == "PATCH":
             try:
                 body = await _json_body(request)

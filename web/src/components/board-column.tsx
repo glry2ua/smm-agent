@@ -7,7 +7,6 @@ import {
   KanbanItem,
 } from "@/components/ui/kanban"
 import { PlatformIcon } from "@/components/ui/platform-icon"
-import { cn } from "@/lib/utils"
 import type { BoardChannel, GroupedPost } from "@/types"
 
 function channelFor(
@@ -89,20 +88,26 @@ function PostCard({
 
 export function PostCardSkeleton({ withImage = true }: { withImage?: boolean }) {
   return (
-    <div className="bg-card overflow-hidden rounded-lg border">
-      {withImage && (
-        <div className="mx-auto w-24 p-2">
-          <Skeleton className="aspect-square w-full" />
-        </div>
-      )}
-      <div className="flex flex-col gap-1 p-2">
-        <Skeleton className={cn("h-2.5", withImage ? "w-full" : "w-11/12")} />
-        <Skeleton className="h-2.5 w-2/3" />
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
-            <Skeleton className="size-3 rounded-full" />
+    <div className="flex flex-col overflow-hidden rounded-lg border bg-card shadow-sm/5">
+      <div className="flex min-h-40">
+        {withImage && (
+          <Skeleton className="m-0.5 h-40 w-40 shrink-0 rounded-md" />
+        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-1 px-2 py-2">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-11/12" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-9/12" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/3" />
+          <div className="mt-auto flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-4 rounded-sm" />
+              <Skeleton className="size-4 rounded-sm" />
+            </div>
+            <Skeleton className="h-4 w-12" />
           </div>
-          <Skeleton className="h-2.5 w-16" />
         </div>
       </div>
     </div>

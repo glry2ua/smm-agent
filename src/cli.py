@@ -84,7 +84,7 @@ class WranglerTopicStore:
         if limit < 1:
             raise ValueError("limit must be at least 1")
         rows = await self._execute(
-            "SELECT id, topic FROM keywords "
+            "SELECT id, topic FROM topics "
             f"WHERE used_at IS NULL ORDER BY RANDOM() LIMIT {int(limit)}"
         )
         return [Topic(id=int(row["id"]), topic=str(row["topic"])) for row in rows]
@@ -94,7 +94,7 @@ class WranglerTopicStore:
             raise ValueError("topic must not be empty")
         escaped_topic = topic.replace("'", "''")
         rows = await self._execute(
-            "SELECT id, topic FROM keywords "
+            "SELECT id, topic FROM topics "
             f"WHERE used_at IS NULL AND topic = '{escaped_topic}' LIMIT 1"
         )
         if not rows:
@@ -105,7 +105,7 @@ class WranglerTopicStore:
     async def mark_used(self, topic_id: int, used_at: datetime) -> None:
         timestamp = used_at.isoformat().replace("'", "''")
         await self._execute(
-            "UPDATE keywords SET used_at = "
+            "UPDATE topics SET used_at = "
             f"'{timestamp}' WHERE id = {int(topic_id)} AND used_at IS NULL"
         )
 
@@ -412,9 +412,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="print the complete machine-readable result instead of the validation report",
     )
     parser.add_argument(
-        "--skip-keyword-update",
+        "--skip-topic-update",
         action="store_true",
-        help="submit posts without marking the selected D1 keywords as used (end-to-end only)",
+        help="submit posts without marking the selected D1 topics as used (end-to-end only)",
     )
     platform_group = parser.add_mutually_exclusive_group()
     platform_group.add_argument(
@@ -476,8 +476,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="skip the Buffer performance analysis queries (dry-run only)",
     )
     args = parser.parse_args(argv)
-    if args.skip_keyword_update and args.mode != "end-to-end":
-        parser.error("--skip-keyword-update can only be used with end-to-end")
+    if args.skip_topic_update and args.mode != "end-to-end":
+        parser.error("--skip-topic-update can only be used with end-to-end")
     platform_selected = args.linkedin or args.instagram or args.facebook
     if platform_selected and args.mode in {"buffer_state", "buffer_insights"}:
         parser.error("platform filters can only be used with dry-run or end-to-end")
@@ -665,16 +665,16 @@ def format_run_report(result: dict[str, Any], *, hyperlinks: bool = False) -> st
         lines.append("D1 topics remain unused; no Buffer drafts or R2 objects were created.")
         lines.append(f"GPT Image 2 files saved locally: {result['images_generated']}")
     else:
-        keyword_status = (
+        topic_update_status = (
             "skipped by flag"
-            if result.get("keyword_update_skipped")
+            if result.get("topic_update_skipped")
             else "yes"
             if result["used_at_updated"]
             else "no"
         )
         lines.append(
             f"Buffer scheduled drafts created: {result['buffer_posts_created']} | "
-            f"D1 keywords marked used: {keyword_status}"
+            f"D1 topics marked used: {topic_update_status}"
         )
         lines.append("Manual action required in Buffer: review each draft and click Schedule Post.")
 
@@ -838,7 +838,7 @@ async def main() -> None:
         dry_run=dry_run,
         selected_topic=(HEADSHOT_TEST_TOPIC if args.mode == "headshot-test" else args.topic),
         require_headshot_reference=args.mode == "headshot-test",
-        skip_keyword_update=args.skip_keyword_update,
+        skip_topic_update=args.skip_topic_update,
         post_count=args.n,
         channel_service=selected_service,
         topic_store=WranglerTopicStore(),

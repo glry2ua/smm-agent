@@ -181,6 +181,7 @@
     --modal-background: var(--color-popover);
     --modal-radius: var(--radius-panel);
     --popover-radius: var(--radius-surface);
+    --input-radius: var(--radius-control);
 }
 
 @theme inline {
@@ -287,8 +288,10 @@
   --color-fg-disabled: var(--neutral-600);
   --color-fg-on-neutral: var(--neutral-950);
   --color-border-control: var(--neutral-400);
-  --color-border-focus: var(--accent-700);
-  --color-border-focus-muted: var(--accent-300);
+  /* Focus uses a slightly darker grey rather than the blue accent so the
+     neutral theme stays neutral. */
+  --color-border-focus: var(--neutral-700);
+  --color-border-focus-muted: var(--neutral-300);
   --color-tooltip: var(--neutral-950);
   --color-fg-on-tooltip: var(--neutral-25);
   --color-sidebar: var(--neutral-50);

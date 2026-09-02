@@ -5,7 +5,7 @@ import { composeRenderProps } from "react-aria-components/composeRenderProps";
 import * as DialogPrimitive from "react-aria-components/Dialog";
 import * as TextPrimitives from "react-aria-components/Text";
 
-import { IconXFilled } from "@tabler/icons-react";
+import { IconX } from "@tabler/icons-react";
 import { Button } from "@/ui/button";
 import { tv } from "tailwind-variants";
 const dialogVariants = tv({
@@ -28,7 +28,11 @@ const dialogVariants = tv({
       "-mx-4 px-4 in-data-popover:-mx-2.5 in-data-popover:px-2.5",
     ],
     footer: "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
-    closeButton: ["absolute", "top-2 right-2"],
+    closeButton: [
+      "absolute top-2.5 right-2.5",
+      // Muted tile with a muted X; the icon warms up to full-contrast on hover.
+      "rounded-lg bg-muted text-fg-muted hover:text-fg pressed:text-fg [&_svg]:size-4",
+    ],
   },
 });
 
@@ -71,7 +75,9 @@ const DialogContent = ({
               aria-label="Close"
               className={closeButton()}
             >
-              <IconXFilled />
+              {/* index.css forces .tabler-icon stroke-width via
+                  --icon-stroke-width, overriding the strokeWidth prop. */}
+              <IconX style={{ "--icon-stroke-width": "2.5" } as React.CSSProperties} />
             </Button>
           )}
         </>

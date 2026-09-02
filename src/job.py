@@ -360,7 +360,7 @@ async def run_weekly_job(
     post_count: int = MAX_POST_COUNT,
     selected_topic: str | None = None,
     require_headshot_reference: bool = False,
-    skip_keyword_update: bool = False,
+    skip_topic_update: bool = False,
     channel_service: str | None = None,
     topic_store: TopicRepository | None = None,
     asset_store: ImageAssetStore | None = None,
@@ -581,7 +581,7 @@ async def run_weekly_job(
         "buffer_posts_created": 0,
         "buffer_submission_type": "scheduled-draft",
         "used_at_updated": False,
-        "keyword_update_skipped": not dry_run and skip_keyword_update,
+        "topic_update_skipped": not dry_run and skip_topic_update,
     }
     if dry_run:
         return result
@@ -613,7 +613,7 @@ async def run_weekly_job(
     ]
     result["buffer_posts"] = buffer_posts
     result["buffer_posts_created"] = len(buffer_posts)
-    if skip_keyword_update:
+    if skip_topic_update:
         return result
     used_at = normalize_now()
     await asyncio.gather(*(store.mark_used(topic.id, used_at) for topic in topics))
