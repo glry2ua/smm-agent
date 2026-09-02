@@ -98,9 +98,8 @@ next draft.
 migrations/             D1 schema migrations
 src/                    Worker entrypoint, job orchestration, CLI, and modules
                         (agent prompts are defined in src/agent_config.py)
-tests/                  Pytest suite
-webui/                  React + shadcn/ui frontend for the content board
-wrangler.jsonc          Cloudflare Worker configuration
+web/                  React + shadcn/ui frontend for the content board
+wrangler.example.jsonc  Template for the gitignored Worker config (fill in database_id)
 pyproject.toml          Python dependencies and tooling
 ```
 
@@ -115,11 +114,11 @@ Key modules in `src/`:
 - `image_pipeline.py` — GPT Image 2 generation and R2 upload.
 - `buffer_client.py` — async GraphQL client for Buffer channel listing, post
   creation, and metrics.
-- `webui_api.py` — board endpoint (`/api/board`) backing the WebUI; loads
+- `web_api.py` — board endpoint (`/api/board`) backing the web UI; loads
   Buffer drafts and scheduled posts.
 - `settings.py` — reads and validates environment-backed configuration.
 - `cli.py` — local CLI for dry-run, end-to-end, and Buffer inspection.
-- `webui/` — React + shadcn/ui frontend for the access-locked content board.
+- `web/` — React + shadcn/ui frontend for the access-locked content board.
 
 ## Prerequisites
 
@@ -152,34 +151,30 @@ Install the following before you begin:
    uv sync
    ```
 
-4. Run the test suite:
-
-   ```bash
-   uv run pytest -q
-   ```
-
 ## Configuration
 
-The Worker reads configuration from Cloudflare environment variables and
-secrets. Non-secret values live in `wrangler.jsonc` under `vars`; secret values
-are set with `wrangler secret put` and never appear in the repository.
+`.env` is the single source of truth for all Worker environment values (secrets
+and tunables alike). Locally it is read directly by `wrangler dev` and the
+Python CLI. In production every value is set with `wrangler secret put <NAME>` —
+secrets are encrypted, write-only environment variables, so `wrangler.jsonc`
+carries no values at all.
 
-| Variable | Where | Purpose |
-| --- | --- | --- |
-| `OPENAI_API_KEY` | secret | Authenticates OpenAI Agents and GPT Image 2 calls |
-| `BUFFER_API_KEY` | secret | Authenticates the Buffer GraphQL API |
-| `BUFFER_ORGANIZATION_ID` | secret | Targets the Buffer organization |
-| `ASSET_PUBLIC_BASE_URL` | secret | Public origin of the Worker, used to build image URLs for Buffer |
-| `OPENAI_IMAGE_MODEL` | `wrangler.jsonc` | GPT Image 2 model name |
-| `OPENAI_IMAGE_WIDTH` | `wrangler.jsonc` | Image width in pixels (multiple of 16) |
-| `OPENAI_IMAGE_HEIGHT` | `wrangler.jsonc` | Image height in pixels (multiple of 16) |
-| `OPENAI_IMAGE_QUALITY` | `wrangler.jsonc` | One of `low`, `medium`, `high`, `auto` |
-| `BUFFER_API_URL` | `wrangler.jsonc` | Buffer GraphQL endpoint |
-| `MIN_SCHEDULE_LEAD_MINUTES` | `wrangler.jsonc` | Minimum minutes between now and a post's due time |
-| `SCHEDULE_HORIZON_DAYS` | `wrangler.jsonc` | Maximum days between now and a post's due time |
-| `MAX_POST_CHARS` | `wrangler.jsonc` | Maximum characters in the Buffer post text |
-| `RETRY_MAX_ATTEMPTS` | `wrangler.jsonc` | Retry attempts for transient Buffer and image errors |
-| `RETRY_BACKOFF_SECONDS` | `wrangler.jsonc` | Initial exponential backoff in seconds |
+| Variable | Purpose |
+| --- | --- |
+| `OPENAI_API_KEY` | Authenticates OpenAI Agents and GPT Image 2 calls |
+| `BUFFER_API_KEY` | Authenticates the Buffer GraphQL API |
+| `BUFFER_ORGANIZATION_ID` | Targets the Buffer organization |
+| `ASSET_PUBLIC_BASE_URL` | Public origin of the Worker, used to build image URLs for Buffer |
+| `OPENAI_IMAGE_MODEL` | GPT Image 2 model name |
+| `OPENAI_IMAGE_WIDTH` | Image width in pixels (multiple of 16) |
+| `OPENAI_IMAGE_HEIGHT` | Image height in pixels (multiple of 16) |
+| `OPENAI_IMAGE_QUALITY` | One of `low`, `medium`, `high`, `auto` |
+| `BUFFER_API_URL` | Buffer GraphQL endpoint |
+| `MIN_SCHEDULE_LEAD_MINUTES` | Minimum minutes between now and a post's due time |
+| `SCHEDULE_HORIZON_DAYS` | Maximum days between now and a post's due time |
+| `MAX_POST_CHARS` | Maximum characters in the Buffer post text |
+| `RETRY_MAX_ATTEMPTS` | Retry attempts for transient Buffer and image errors |
+| `RETRY_BACKOFF_SECONDS` | Initial exponential backoff in seconds |
 
 ## R2 brand information and source images
 
@@ -273,7 +268,7 @@ List the configured Buffer channels:
 uv run python src/cli.py buffer_state
 ```
 
-## WebUI
+## Web
 
 The Worker also serves a minimal kanban board at the root of its origin. The
 board shows two columns:
@@ -285,41 +280,44 @@ The board is read-only for now; interactivity and further features come later.
 
 ### Local configuration
 
-`wrangler.jsonc` is committed with `database_id` left blank so no account
-identifier is published. For local development, create
-`wrangler.local.jsonc` (gitignored) by copying `wrangler.jsonc` and filling in
-your D1 database ID:
+Two gitignored files carry your account-specific state; both are created from
+committed templates:
 
 ```bash
 npx wrangler d1 list                      # find your database_id
-sed 's/"database_id": ""/"database_id": "<your-database-id>"/' \
-  wrangler.jsonc > wrangler.local.jsonc
+sed 's/<your-database-id>/<the-id-from-d1-list>/' \
+  wrangler.example.jsonc > wrangler.jsonc
+cp .env.example .env                      # then fill in the values
 ```
 
-All `wrangler`/`pywrangler` commands below take `--config wrangler.local.jsonc`.
+`.env` holds every Worker environment value; see **Configuration** above. In
+production each value is set once with `wrangler secret put <NAME>` (values are
+write-only there — changes are made by re-running the command).
 
 ### Building the frontend
 
-The WebUI is a React + Vite + shadcn/ui app in `webui/`. Its compiled output in
-`webui/dist` is deployed as a static asset by the Worker. Build it before
+The web UI is a React + Vite + shadcn/ui app in `web/`. Its compiled output in
+`web/dist` is deployed as a static asset by the Worker. Build it before
 deploying or running `wrangler dev`:
 
 ```bash
-cd webui && npm install && npm run build
+cd web && npm install && npm run build
 ```
+
+Or `npm run build` from the repo root (also vendors the Worker's Python deps).
 
 Run the full local stack (Worker + Vite hot reload) from the repo root:
 
 ```bash
 uv run pywrangler sync   # one-time: vendor Python deps into python_modules/ (required by wrangler)
-./dev.sh
+npm run dev
 ```
 
 The UI is at `http://localhost:5173`; the Worker is at `http://localhost:8787`.
-`dev.sh` waits for the Worker to be ready, then starts Vite, and stops both on
-Ctrl-C. (`cd webui && npm run dev` does the same thing.) If `wrangler dev` fails
-with `ModuleNotFoundError: No module named 'workers'`, `python_modules/` is
-missing — re-run `uv run pywrangler sync`.
+`npm run dev` runs `wrangler dev` and Vite together; `wrangler dev` reads all
+values from `.env` directly. Ctrl-C stops both. If `wrangler dev` fails with
+`ModuleNotFoundError: No module named 'workers'`, run `npm run build` (or
+`uv run pywrangler sync`) to vendor the Python dependencies first.
 
 #### Dev runs against production resources (dev = prod)
 
@@ -327,16 +325,19 @@ Local development is deliberately configured to exercise the exact production
 environment, so what you test locally is what ships:
 
 - **Remote bindings**: the `DB` (D1) and `ASSETS` (R2) bindings are marked
-  `"remote": true` in `wrangler.jsonc`. `wrangler dev` still executes the
-  Worker code locally (fast reload), but every binding call is proxied to the
-  real deployed D1 database and R2 bucket — the same ones production uses.
-  There is no separate dev database or bucket to seed or keep in sync.
-- **Secrets**: `dev.sh` regenerates `.dev.vars` from `.env` on every start, so
-  the local Worker uses the identical `OPENAI_API_KEY`, `BUFFER_API_KEY`,
-  `BUFFER_ORGANIZATION_ID`, and `ASSET_PUBLIC_BASE_URL` values as production.
-  Keep `.env` in sync with `wrangler secret put` values.
-- **Schema**: `dev.sh` applies D1 migrations with `--remote` before starting,
-  so the database is always on the current schema (migrations are idempotent).
+  `"remote": true` in `wrangler.jsonc`. `wrangler dev` executes the Worker code
+  locally (fast reload), but every binding call is proxied to the real deployed
+  D1 database and R2 bucket — the same ones production uses. There is no
+  separate dev database or bucket to seed or keep in sync. Because the deployed
+  Worker origin is behind Cloudflare Access, this needs either an interactive
+  wrangler login (browser flow on first start) or Access service credentials
+  set as environment variables (`CLOUDFLARE_ACCESS_CLIENT_ID` /
+  `CLOUDFLARE_ACCESS_CLIENT_SECRET`).
+- **Secrets**: `wrangler dev` reads every value directly from `.env`, so the
+  local Worker uses the identical values as production. Keep `.env` in sync
+  with `wrangler secret put` values.
+- **Schema**: apply D1 migrations before starting (idempotent):
+  `npx wrangler d1 migrations apply smm-agent-db --remote`.
 
 Because of this, board actions taken while developing (accept, edit, delete,
 image replace) mutate real live posts in Buffer. Treat local dev like a
@@ -375,54 +376,47 @@ needed.
 The Worker deploys with `pywrangler`, the CLI for Cloudflare Python Workers.
 `pywrangler` bundles the Python dependencies into the Worker upload.
 
-1. Create `wrangler.local.jsonc` from `wrangler.jsonc` and fill in the
-   `database_id` (find it with `npx wrangler d1 list`). See
-   **Local configuration** above.
-2. Apply the D1 migrations to the remote database:
+1. Apply the D1 migrations to the remote database:
 
    ```bash
-   npx wrangler d1 migrations apply smm-agent-db --remote --config wrangler.local.jsonc
+   npx wrangler d1 migrations apply smm-agent-db --remote
    ```
 
-3. Set the secrets. Each command prompts for the value:
+2. Set every value from `.env` as a production secret (values are write-only;
+   changes are made by re-running this). Bulk-load straight from `.env`:
 
    ```bash
-   npx wrangler secret put OPENAI_API_KEY --config wrangler.local.jsonc
-   npx wrangler secret put BUFFER_API_KEY --config wrangler.local.jsonc
-   npx wrangler secret put BUFFER_ORGANIZATION_ID --config wrangler.local.jsonc
-   npx wrangler secret put ASSET_PUBLIC_BASE_URL --config wrangler.local.jsonc
+   node -e "const o={};for(const l of require('fs').readFileSync('.env','utf8').split(/\r?\n/)){if(!l||l.startsWith('#'))continue;const i=l.indexOf('=');o[l.slice(0,i)]=l.slice(i+1)}console.log(JSON.stringify(o))" \
+     | npx wrangler secret bulk -
    ```
 
-   For `ASSET_PUBLIC_BASE_URL`, use the deployed Worker origin (for example,
-   `https://smm-agent.<subdomain>.workers.dev`) without a trailing path.
+   Or individually: `npx wrangler secret put <NAME>` for each name in
+   `.env.example`. Note `ASSET_PUBLIC_BASE_URL` must be the deployed Worker
+   origin (for example, `https://smm-agent.<subdomain>.workers.dev`) without a
+   trailing path.
 
-4. Build the WebUI so its static assets are included in the deployment:
+3. Build:
 
    ```bash
-   cd webui && npm run build
+   npm run build
    ```
 
-5. Deploy the Worker:
+4. Deploy the Worker:
 
    ```bash
-   PATH="/opt/homebrew/opt/node@22/bin:$PATH" \
-     uv run pywrangler deploy --config wrangler.local.jsonc
+   npx wrangler deploy
    ```
+
+   (Or `uv run pywrangler deploy` — both use `wrangler.jsonc`.)
 
 The cron trigger runs every Monday at 14:00 UTC (`0 14 * * MON`).
 
-## Testing
-
-The test suite uses `pytest`:
-
-```bash
-uv run pytest -q
-```
+## Linting
 
 Lint the code with `ruff`:
 
 ```bash
-uv run ruff check src tests
+uv run ruff check src
 ```
 
 ## Notes on dependency versions

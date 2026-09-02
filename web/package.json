@@ -1,10 +1,10 @@
 {
-  "name": "smm-agent-webui",
+  "name": "smm-agent-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "bash ../dev.sh",
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },

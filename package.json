@@ -3,10 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "bash dev.sh",
-    "build:webui": "cd webui && npm run build"
+    "dev": "concurrently -n worker,web \"wrangler dev --port 8787\" \"npm run dev --prefix web\"",
+    "build": "uv run pywrangler sync && npm run build --prefix web",
+    "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
+    "concurrently": "^9.2.4",
     "wrangler": "^4.127.1"
   }
 }

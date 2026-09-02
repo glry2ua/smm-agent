@@ -12,7 +12,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8,<9",
     "ruff>=0.9,<1",
     "workers-py>=1.7",
     "workers-runtime-sdk",
@@ -27,7 +26,3 @@ select = ["E", "F", "I", "UP"]
 
 [tool.uv]
 package = false
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]

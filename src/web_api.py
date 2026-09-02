@@ -1,4 +1,4 @@
-"""Board endpoint for the WebUI: current drafts and accepted (scheduled) posts."""
+"""Board endpoint for the web UI: current drafts and accepted (scheduled) posts."""
 
 from __future__ import annotations
 
@@ -16,14 +16,30 @@ DRAFT_STATUS = "draft"
 ACCEPTED_STATUS = "scheduled"
 
 
-def _card(post: Any, channel_id: str) -> dict[str, Any]:
+def _origin_relative(url: str, base_url: str) -> str:
+    """Rewrite asset-origin URLs to origin-relative paths.
+
+    Asset URLs stored on Buffer point at the deployed Worker origin. Served
+    as absolute URLs, browsers fetch images cross-origin, which Cloudflare
+    Access blocks when the page is served from a different origin (local dev).
+    Relative paths resolve against whichever origin serves the page: the
+    Worker itself in production, the local worker via the Vite proxy in dev.
+    """
+    if base_url and url.startswith(f"{base_url}/"):
+        return url[len(base_url):]
+    return url
+
+
+def _card(post: Any, channel_id: str, asset_base_url: str) -> dict[str, Any]:
     assets = [
         {
             "id": str(asset.get("id") or ""),
             "type": str(asset.get("type") or ""),
             "mime_type": str(asset.get("mimeType") or ""),
-            "source": str(asset.get("source") or ""),
-            "thumbnail": str(asset.get("thumbnail") or ""),
+            "source": _origin_relative(str(asset.get("source") or ""), asset_base_url),
+            "thumbnail": _origin_relative(
+                str(asset.get("thumbnail") or ""), asset_base_url
+            ),
         }
         for asset in post.assets
     ]
@@ -90,6 +106,12 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
             }
             for channel in channels
         ],
-        "drafts": [_card(post, post.channel_id) for post in drafts],
-        "accepted": [_card(post, post.channel_id) for post in accepted],
+        "drafts": [
+            _card(post, post.channel_id, settings.asset_public_base_url)
+            for post in drafts
+        ],
+        "accepted": [
+            _card(post, post.channel_id, settings.asset_public_base_url)
+            for post in accepted
+        ],
     }

@@ -1,0 +1,40 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore wrangler config from template
+        run: sed "s/<your-database-id>/${{ secrets.D1_DATABASE_ID }}/" wrangler.example.jsonc > wrangler.jsonc
+
+      - name: Install Worker dependencies (wrangler)
+        run: npm ci
+
+      - name: Install + build web UI
+        run: cd web && npm ci && npm run build
+
+      - name: Sync Python dependencies for the Worker bundle
+        run: uv run pywrangler sync
+
+      - name: Deploy
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -20,7 +20,7 @@ from board_actions import (
 from images.image_pipeline import GENERATED_GRAPHICS_PATH_PREFIX, R2ImageAssetStore
 from job import run_weekly_job
 from settings import Settings
-from webui_api import load_board
+from web_api import load_board
 
 
 def _json_response(body: dict[str, object], *, status: int = 200) -> Response:
