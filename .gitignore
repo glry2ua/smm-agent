@@ -3,7 +3,6 @@
 !.env.example
 .venv/
 .venv-workers/
-.python-version
 __pycache__/
 *.py[cod]
 .ruff_cache/
