@@ -56,7 +56,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
 
       - name: Restore wrangler config from template
-        run: sed "s/<your-database-id>/${{ secrets.D1_DATABASE_ID }}/" wrangler.example.jsonc > wrangler.jsonc
+        run: |
+          sed -e "s/<your-database-id>/${{ secrets.D1_DATABASE_ID }}/" \
+              -e "s/<your-bucket-name>/${{ secrets.R2_BUCKET_NAME }}/" \
+              wrangler.example.jsonc > wrangler.jsonc
 
       - name: Install Worker dependencies (wrangler)
         run: npm ci
