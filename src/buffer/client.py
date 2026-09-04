@@ -23,6 +23,7 @@ from buffer.queries import (
     DELETE_POST_QUERY,
     EDIT_POST_QUERY,
     GET_AGGREGATED_POST_METRICS_QUERY,
+    GET_BOARD_QUERY,
     GET_CHANNELS_QUERY,
     GET_POSTS_QUERY,
 )
@@ -86,6 +87,50 @@ def build_create_post_input(
     if metadata is not None:
         input_payload["metadata"] = metadata
     return input_payload
+
+
+def _parse_channels(data: Mapping[str, Any]) -> list[BufferChannel]:
+    channels = data.get("channels")
+    if not isinstance(channels, list):
+        raise BufferAPIError("Buffer did not return a channel list")
+    return [
+        BufferChannel(
+            id=str(channel["id"]),
+            name=str(channel.get("name") or ""),
+            display_name=str(channel.get("displayName") or ""),
+            service=str(channel.get("service") or ""),
+        )
+        for channel in channels
+        if isinstance(channel, Mapping) and channel.get("id")
+    ]
+
+
+def _parse_posts_page(data: Mapping[str, Any]) -> tuple[list[BufferPost], Mapping[str, Any]]:
+    connection = data.get("posts")
+    if not isinstance(connection, Mapping):
+        raise BufferAPIError("Buffer did not return a posts connection")
+    edges = connection.get("edges")
+    page_info = connection.get("pageInfo")
+    if not isinstance(edges, list) or not isinstance(page_info, Mapping):
+        raise BufferAPIError("Buffer returned an invalid posts page")
+    posts = [
+        _parse_post_node(edge["node"])
+        for edge in edges
+        if isinstance(edge, Mapping)
+        and isinstance(edge.get("node"), Mapping)
+        and edge["node"].get("id")
+    ]
+    return posts, page_info
+
+
+def _next_cursor(page_info: Mapping[str, Any], after: str | None) -> str | None:
+    """Return the cursor for the next page, or ``None`` when this is the last."""
+    if not page_info.get("hasNextPage"):
+        return None
+    end_cursor = page_info.get("endCursor")
+    if not end_cursor or end_cursor == after:
+        raise BufferAPIError("Buffer returned an invalid posts pagination cursor")
+    return str(end_cursor)
 
 
 def _parse_post_node(node: Mapping[str, Any]) -> BufferPost:
@@ -192,19 +237,7 @@ class BufferClient:
             GET_CHANNELS_QUERY,
             {"organizationId": organization_id},
         )
-        channels = data.get("channels")
-        if not isinstance(channels, list):
-            raise BufferAPIError("Buffer did not return a channel list")
-        return [
-            BufferChannel(
-                id=str(channel["id"]),
-                name=str(channel.get("name") or ""),
-                display_name=str(channel.get("displayName") or ""),
-                service=str(channel.get("service") or ""),
-            )
-            for channel in channels
-            if isinstance(channel, Mapping) and channel.get("id")
-        ]
+        return _parse_channels(data)
 
     async def get_aggregated_post_metrics(
         self,
@@ -254,17 +287,17 @@ class BufferClient:
         as ``sent``, ``scheduled``, or ``draft``. When ``None``, posts of every
         status are returned.
         """
+        post_filter: dict[str, Any] = {
+            "channelIds": channel_ids,
+            "startDate": _utc_iso(start),
+            "endDate": _utc_iso(end),
+        }
+        if statuses is not None:
+            post_filter["status"] = statuses
 
         posts: list[BufferPost] = []
         after: str | None = None
         while True:
-            post_filter: dict[str, Any] = {
-                "channelIds": channel_ids,
-                "startDate": _utc_iso(start),
-                "endDate": _utc_iso(end),
-            }
-            if statuses is not None:
-                post_filter["status"] = statuses
             data = await self._graphql(
                 GET_POSTS_QUERY,
                 {
@@ -280,27 +313,62 @@ class BufferClient:
                     "after": after,
                 },
             )
-            connection = data.get("posts")
-            if not isinstance(connection, Mapping):
-                raise BufferAPIError("Buffer did not return a posts connection")
-            edges = connection.get("edges")
-            page_info = connection.get("pageInfo")
-            if not isinstance(edges, list) or not isinstance(page_info, Mapping):
-                raise BufferAPIError("Buffer returned an invalid posts page")
-            posts.extend(
-                _parse_post_node(edge["node"])
-                for edge in edges
-                if isinstance(edge, Mapping)
-                and isinstance(edge.get("node"), Mapping)
-                and edge["node"].get("id")
-            )
-            if not page_info.get("hasNextPage"):
-                break
-            end_cursor = page_info.get("endCursor")
-            if not end_cursor or end_cursor == after:
-                raise BufferAPIError("Buffer returned an invalid posts pagination cursor")
-            after = str(end_cursor)
-        return posts
+            page, page_info = _parse_posts_page(data)
+            posts.extend(page)
+            after = _next_cursor(page_info, after)
+            if after is None:
+                return posts
+
+    async def get_board_snapshot(
+        self,
+        organization_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        statuses: list[str],
+        page_size: int = 50,
+    ) -> tuple[list[BufferChannel], list[BufferPost]]:
+        """Channels plus every post of the given statuses in one HTTP request.
+
+        The whole board is a single GraphQL document: ``channels`` and the
+        paginated ``posts`` connection as sibling root fields. The posts
+        filter cannot reference the channels result inside the same document,
+        so it selects by status and date across the organization — callers
+        restrict posts to the returned channels client-side (equivalent to
+        the old per-channel filter, which only queried unlocked channels).
+        Follow-up pages re-send the same document and only read ``posts``.
+        """
+        if not organization_id.strip():
+            raise BufferAPIError("Buffer configuration is missing BUFFER_ORGANIZATION_ID")
+        variables: dict[str, Any] = {
+            "organizationId": organization_id,
+            "input": {
+                "organizationId": organization_id,
+                "filter": {
+                    "startDate": _utc_iso(start),
+                    "endDate": _utc_iso(end),
+                    "status": list(statuses),
+                },
+                "sort": [
+                    {"field": "dueAt", "direction": "desc"},
+                    {"field": "createdAt", "direction": "desc"},
+                ],
+            },
+            "first": page_size,
+        }
+        channels: list[BufferChannel] | None = None
+        posts: list[BufferPost] = []
+        after: str | None = None
+        while True:
+            data = await self._graphql(GET_BOARD_QUERY, {**variables, "after": after})
+            if channels is None:
+                channels = _parse_channels(data)
+            page, page_info = _parse_posts_page(data)
+            posts.extend(page)
+            after = _next_cursor(page_info, after)
+            if after is None:
+                assert channels is not None  # set on the first iteration
+                return channels, posts
 
     async def list_sent_posts(
         self,

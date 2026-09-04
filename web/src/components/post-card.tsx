@@ -30,8 +30,8 @@ export function PostCard({
           <SkeletonImage
             src={imageUrl}
             alt=""
-            className="h-40 m-0.5 shrink-0 rounded-md overflow-hidden"
-            imgClassName="h-full w-full object-contain"
+            className="h-42 w-32 m-0.5 shrink-0 rounded-md overflow-hidden"
+            imgClassName="h-full w-full object-cover"
             loading="lazy"
           />
         )}

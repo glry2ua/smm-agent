@@ -1,5 +1,24 @@
 """GraphQL documents used by the Buffer client."""
 
+# Slim post node for the board: everything the web board renders and nothing
+# it doesn't (no tags, via, externalLink, or per-post metrics — the fat
+# selection lives in GET_POSTS_QUERY for the insights snapshot).
+_BOARD_POST_NODE = """
+id
+text
+channelId
+status
+createdAt
+dueAt
+sentAt
+assets { id type mimeType source thumbnail }
+metadata {
+  __typename
+  ... on InstagramPostMetadata { type shouldShareToFeed }
+  ... on FacebookPostMetadata { type }
+}
+"""
+
 CREATE_POST_QUERY = """
 mutation CreatePost($input: CreatePostInput!) {
   createPost(input: $input) {
@@ -63,6 +82,37 @@ query GetChannels($organizationId: OrganizationId!) {
   }
 }
 """
+
+GET_BOARD_QUERY = (
+    """
+query GetBoard(
+  $organizationId: OrganizationId!
+  $input: PostsInput!
+  $first: Int!
+  $after: String
+) {
+  channels(input: { organizationId: $organizationId, filter: { isLocked: false } }) {
+    id
+    name
+    displayName
+    service
+  }
+  posts(input: $input, first: $first, after: $after) {
+    edges {
+      node {
+"""
+    + _BOARD_POST_NODE
+    + """
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+"""
+)
 
 GET_AGGREGATED_POST_METRICS_QUERY = """
 query GetAggregatedPostMetrics($input: AggregatedPostMetricsInput!) {

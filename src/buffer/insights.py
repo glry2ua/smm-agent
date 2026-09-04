@@ -75,9 +75,9 @@ async def load_buffer_insights(
         channels if channels is not None else await client.list_available_channels(organization_id)
     )
 
-    # Index-aligned with selected_channels: gather 1 is the aggregate summary for
-    # channel i, gather 2 is that channel's sent posts. Nested so both groups
-    # fetch concurrently.
+    # Aggregated summaries stay per-channel: each channel's snapshot carries
+    # its own metrics rollup for the analysis prompt. The sent posts are a
+    # single query across all channels, grouped by the node's channelId.
     async def _fetch_summaries() -> list[Any]:
         return await asyncio.gather(
             *(
@@ -89,14 +89,17 @@ async def load_buffer_insights(
         )
 
     async def _fetch_post_lists() -> list[list[Any]]:
-        return await asyncio.gather(
-            *(
-                client.list_sent_posts(
-                    organization_id, start=start, end=end, channel_ids=[channel.id]
-                )
-                for channel in selected_channels
-            )
+        posts = await client.list_sent_posts(
+            organization_id,
+            start=start,
+            end=end,
+            channel_ids=[channel.id for channel in selected_channels],
         )
+        by_channel: dict[str, list[Any]] = {}
+        for post in posts:
+            by_channel.setdefault(post.channel_id, []).append(post)
+        # Index-aligned with selected_channels (strict zip below).
+        return [by_channel.get(channel.id, []) for channel in selected_channels]
 
     summaries, post_lists = await asyncio.gather(_fetch_summaries(), _fetch_post_lists())
     return {

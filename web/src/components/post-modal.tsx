@@ -78,7 +78,7 @@ export function PostModal({
                     src={imageUrl}
                     alt=""
                     className="h-full w-full"
-                    imgClassName="h-full w-full object-cover"
+                    imgClassName="h-full w-full object-contain"
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">

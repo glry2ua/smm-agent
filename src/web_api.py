@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from buffer.client import BufferAPIError, BufferClient
+from buffer.client import BufferAPIError, BufferClient, BufferPost
 from settings import Settings
 
 LOOKBACK_DAYS = 30
@@ -17,11 +16,11 @@ DRAFT_STATUS = "draft"
 ACCEPTED_STATUS = "scheduled"
 SENT_STATUS = "sent"
 
-# Buffer's quotas are brutal (250 calls/24h shared across key + integrations)
-# and each raw board load costs 4 calls. Cache per-isolate: channels barely
-# ever change; posts are cached briefly and invalidated by mutations. When
-# Buffer rate-limits us, serve the stale board instead of an error.
-CHANNELS_TTL_SECONDS = 600
+# Buffer's quotas are brutal (250 calls/24h shared across key + integrations).
+# A raw board load is a single GraphQL document (two when the posts connection
+# overflows one page). Cache per-isolate: posts are cached briefly and
+# invalidated by mutations. When Buffer rate-limits us, serve the stale board
+# instead of an error.
 BOARD_TTL_SECONDS = 60
 _CACHE: dict[str, tuple[float, Any]] = {}
 
@@ -114,46 +113,27 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
     start = reference.astimezone(UTC) - timedelta(days=LOOKBACK_DAYS)
     end = reference.astimezone(UTC) + timedelta(days=LOOKAHEAD_DAYS)
 
-    channels_key = f"channels:{settings.buffer_organization_id}"
-    now_mono = time.monotonic()
-    hit = _CACHE.get(channels_key)
-    if hit is not None and now_mono - hit[0] < CHANNELS_TTL_SECONDS:
-        channels = hit[1]
-    else:
-        channels = await client.list_available_channels(settings.buffer_organization_id)
-        _CACHE[channels_key] = (now_mono, channels)
-    channel_ids = [channel.id for channel in channels]
-    if not channel_ids:
-        return {
-            "fetched_at": reference.isoformat().replace("+00:00", "Z"),
-            "channels": [],
-            "drafts": [],
-            "accepted": [],
-            "posted": [],
-        }
-    drafts, accepted, sent = await asyncio.gather(
-        client.list_posts(
-            settings.buffer_organization_id,
-            start=start,
-            end=end,
-            channel_ids=channel_ids,
-            statuses=[DRAFT_STATUS],
-        ),
-        client.list_posts(
-            settings.buffer_organization_id,
-            start=start,
-            end=end,
-            channel_ids=channel_ids,
-            statuses=[ACCEPTED_STATUS],
-        ),
-        client.list_posts(
-            settings.buffer_organization_id,
-            start=start,
-            end=end,
-            channel_ids=channel_ids,
-            statuses=[SENT_STATUS],
-        ),
+    # One GraphQL document returns the channels and every draft/scheduled/sent
+    # post. The posts filter cannot reference the channels result inside the
+    # same document, so posts come back organization-wide and are restricted
+    # to the returned (unlocked) channels here — the same set the old
+    # per-channel server-side filter produced.
+    channels, posts = await client.get_board_snapshot(
+        settings.buffer_organization_id,
+        start=start,
+        end=end,
+        statuses=[DRAFT_STATUS, ACCEPTED_STATUS, SENT_STATUS],
     )
+    channel_ids = {channel.id for channel in channels}
+    by_status: dict[str, list[BufferPost]] = {
+        DRAFT_STATUS: [],
+        ACCEPTED_STATUS: [],
+        SENT_STATUS: [],
+    }
+    for post in posts:
+        if post.channel_id in channel_ids and post.status in by_status:
+            by_status[post.status].append(post)
+
     return {
         "fetched_at": reference.isoformat().replace("+00:00", "Z"),
         "channels": [
@@ -165,9 +145,16 @@ async def load_board(settings: Settings, *, now: datetime | None = None) -> dict
             }
             for channel in channels
         ],
-        "drafts": [_card(post, post.channel_id, settings.asset_public_base_url) for post in drafts],
-        "accepted": [
-            _card(post, post.channel_id, settings.asset_public_base_url) for post in accepted
+        "drafts": [
+            _card(post, post.channel_id, settings.asset_public_base_url)
+            for post in by_status[DRAFT_STATUS]
         ],
-        "posted": [_card(post, post.channel_id, settings.asset_public_base_url) for post in sent],
+        "accepted": [
+            _card(post, post.channel_id, settings.asset_public_base_url)
+            for post in by_status[ACCEPTED_STATUS]
+        ],
+        "posted": [
+            _card(post, post.channel_id, settings.asset_public_base_url)
+            for post in by_status[SENT_STATUS]
+        ],
     }
