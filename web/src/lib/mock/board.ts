@@ -68,21 +68,21 @@ const CHANNELS: BoardChannel[] = [
   {
     id: ids.channels.instagram,
     // Buffer `name` is the channel's handle / page slug.
-    name: "andrewmiller.sanjose",
+    name: "agent.sanjose",
     // `display_name` is the user-assigned label shown in Buffer.
-    display_name: "Andrew Miller — San Jose",
+    display_name: "Sample Agent — San Jose",
     service: "instagram",
   },
   {
     id: ids.channels.facebook,
-    name: "MillerRealtyGroup",
-    display_name: "Miller Realty Group",
+    name: "SampleRealtyGroup",
+    display_name: "Sample Realty Group",
     service: "facebook",
   },
   {
     id: ids.channels.linkedin,
-    name: "andrew-miller-san-jose",
-    display_name: "Andrew Miller",
+    name: "sample-agent-san-jose",
+    display_name: "Sample Agent",
     service: "linkedin",
   },
 ];
@@ -291,7 +291,7 @@ function board(): Board {
   };
   return {
     // worker.py: "{contact.first_name}'s Agent" from R2 contact.json.
-    title: "Andrew's Agent",
+    title: "Sample Agent",
     // web_api.py serializes fetched_at without milliseconds.
     fetched_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     channels: CHANNELS,

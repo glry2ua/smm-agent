@@ -115,6 +115,33 @@ uv run python src/cli.py end-to-end --n=1   # full run: creates Buffer drafts
 uv run python src/cli.py buffer_state       # list configured Buffer channels
 ```
 
+## Scripts
+
+`npm run <command>` from the repo root:
+
+| Command | What it does |
+| --- | --- |
+| `dev` | Runs the worker & web UI locally. Worker uses production data, non-local. |
+| `web-mock` | Runs the web UI with mocked data. |
+| `build` | Builds the web UI and vendors Python deps for wrangler (run once). |
+| `deploy` | Builds, then deploys the Worker and web UI to Cloudflare. |
+| `lint:py` | Lints and format-checks the Python worker code (src/). |
+| `typecheck:py` | Type-checks the Python worker code. |
+| `lint:web` | Lints the web UI code (web/). |
+| `typecheck:web` | Type-checks the web UI code (web/). |
+| `check` | Runs all four checks — what CI runs before deploying. |
+
+`npm run <command>` inside `web/`:
+
+| Command | What it does |
+| --- | --- |
+| `dev` | Dev server at localhost:5173; /api, /health and /assets go to a backend on :8787. |
+| `web-mock` | Dev server with fake in-memory data — no backend or API keys needed. |
+| `build` | Type-checks the code, then builds the production site into dist/. |
+| `preview` | Serves the dist/ build locally so you can check it before deploying. |
+| `lint` | Lints the code in src/ with oxlint. |
+| `typecheck` | Type-checks the whole project without producing any files. |
+
 ## Deploy
 
 1. Set every value from `.env` as a production secret:

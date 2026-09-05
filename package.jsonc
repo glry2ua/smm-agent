@@ -3,6 +3,7 @@
  *   - src/  — the Python Cloudflare Worker (the marketing agent)
  *   - web/  — the React web UI
  * Python commands use `uv` (a Python package manager, like npm for Python).
+ * npm runs `package.json`; this file is the commented doc copy — keep both in sync.
  */
 {
   "name": "smm-agent",
