@@ -1,16 +1,31 @@
+/**
+ * Root scripts for the whole project:
+ *   - src/  — the Python Cloudflare Worker (the marketing agent)
+ *   - web/  — the React web UI
+ * Python commands use `uv` (a Python package manager, like npm for Python).
+ */
 {
   "name": "smm-agent",
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    // Runs the worker & web UI locally. Worker uses production data, non-local.
     "dev": "concurrently -n worker,web \"wrangler dev --port 8787\" \"npm run dev --prefix web\"",
+    // Runs the web UI with mocked data.
     "web-mock": "npm run web-mock --prefix web",
+    // Builds the web UI and vendors Python deps for wrangler (run once).
     "build": "uv run pywrangler sync && npm run build --prefix web",
+    // Builds, then deploys the Worker and web UI to Cloudflare.
     "deploy": "npm run build && wrangler deploy",
+    // Lints and format-checks the Python worker code (src/).
     "lint:py": "uv run ruff check src && uv run ruff format --check src",
+    // Type-checks the Python worker code.
     "typecheck:py": "uv run ty check .",
+    // Lints the web UI code (web/).
     "lint:web": "npm run lint --prefix web",
+    // Type-checks the web UI code (web/).
     "typecheck:web": "npm run typecheck --prefix web",
+    // Runs all four checks — what CI runs before deploying.
     "check": "npm run lint:py && npm run typecheck:py && npm run lint:web && npm run typecheck:web"
   },
   "devDependencies": {
